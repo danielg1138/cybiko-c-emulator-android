@@ -654,12 +654,7 @@ static void execute_dma_transfer(address_bus_t *bus, int channel)
         return;
     }
 
-    if (bus->dma_debug_log < 50) {
-        uint32_t pc = bus->cpu ? bus->cpu->last_start_pc : 0;
-        fprintf(stderr, "[DMA] ch%d: src=0x%06X dst=0x%06X count=%d mode16=%d PC=0x%06X\n",
-                channel, src_addr, dst_addr, count, mode16 ? 1 : 0, pc);
-        bus->dma_debug_log++;
-    }
+    (void)0; /* DMA transfer - logging suppressed */
 
     if (mode16) {
         for (int i = 0; i < count; i++) {

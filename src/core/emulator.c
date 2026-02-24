@@ -44,14 +44,14 @@ cybiko_emu_t *cybiko_create(const cybiko_hal_t *hal) {
     /* Copy the HAL callbacks */
     emu->hal = *hal;
 
+    /* Initialize the bus itself (must come before memory_init - zeroes struct) */
+    bus_init(&emu->bus);
+
     /* Initialize memory regions in the bus */
     memory_init(&emu->bus.boot_rom,     0x8000,   false);  /* 32 KB, read-only  */
     memory_init(&emu->bus.external_ram, 0x200000, true);   /* 2 MB, writable    */
     memory_init(&emu->bus.flash_rom,    0x80000,  false);  /* 512 KB, read-only */
     memory_init(&emu->bus.on_chip_ram,  0x2400,   true);   /* ~10 KB, writable  */
-
-    /* Initialize the bus itself */
-    bus_init(&emu->bus);
 
     /* Wire peripherals into bus */
     emu->bus.lcd       = &emu->lcd;
