@@ -1,1 +1,208 @@
-/* Cybiko emulator - stub */
+/*
+ * Cybiko emulator orchestrator.
+ *
+ * Ties together CPU, address bus, LCD, timers, RTC, speaker, and keyboard
+ * into a single runnable emulator driven by a platform HAL.
+ */
+#include "emulator.h"
+#include "h8s_cpu.h"
+#include "address_bus.h"
+#include "hd66421.h"
+#include "timer8.h"
+#include "timer16.h"
+#include "rtc.h"
+#include "speaker.h"
+#include "keyboard.h"
+#include "cfs.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+struct cybiko_emu {
+    cybiko_hal_t hal;
+
+    h8s_cpu_t     cpu;
+    address_bus_t bus;
+    hd66421_t     lcd;
+    timer8_t      timer8[2];
+    timer16_t     timer16[6];
+    rtc_t         rtc;
+    speaker_t     speaker;
+    keyboard_t    keyboard;
+
+    bool     running;
+    uint64_t total_steps;
+    uint32_t frame_count;
+};
+
+/* ---------- lifecycle ---------- */
+
+cybiko_emu_t *cybiko_create(const cybiko_hal_t *hal) {
+    cybiko_emu_t *emu = calloc(1, sizeof(cybiko_emu_t));
+    if (!emu) return NULL;
+
+    /* Copy the HAL callbacks */
+    emu->hal = *hal;
+
+    /* Initialize memory regions in the bus */
+    memory_init(&emu->bus.boot_rom,     0x8000,   false);  /* 32 KB, read-only  */
+    memory_init(&emu->bus.external_ram, 0x200000, true);   /* 2 MB, writable    */
+    memory_init(&emu->bus.flash_rom,    0x80000,  false);  /* 512 KB, read-only */
+    memory_init(&emu->bus.on_chip_ram,  0x2400,   true);   /* ~10 KB, writable  */
+
+    /* Initialize the bus itself */
+    bus_init(&emu->bus);
+
+    /* Wire peripherals into bus */
+    emu->bus.lcd       = &emu->lcd;
+    emu->bus.timer8[0] = &emu->timer8[0];
+    emu->bus.timer8[1] = &emu->timer8[1];
+    for (int i = 0; i < 6; i++) {
+        emu->bus.timer16[i] = &emu->timer16[i];
+    }
+    emu->bus.rtc      = &emu->rtc;
+    emu->bus.speaker  = &emu->speaker;
+    emu->bus.keyboard = &emu->keyboard;
+
+    /* Initialize peripherals */
+    hd66421_init(&emu->lcd);
+
+    timer8_init(&emu->timer8[0], 0, &emu->cpu);
+    timer8_init(&emu->timer8[1], 1, &emu->cpu);
+
+    /* Timer16 channels: (channel, tgrCount, baseVector, cpu) */
+    timer16_init(&emu->timer16[0], 0, 4, 32, &emu->cpu);
+    timer16_init(&emu->timer16[1], 1, 2, 40, &emu->cpu);
+    timer16_init(&emu->timer16[2], 2, 2, 44, &emu->cpu);
+    timer16_init(&emu->timer16[3], 3, 4, 48, &emu->cpu);
+    timer16_init(&emu->timer16[4], 4, 2, 56, &emu->cpu);
+    timer16_init(&emu->timer16[5], 5, 2, 60, &emu->cpu);
+
+    rtc_init(&emu->rtc);
+    speaker_init(&emu->speaker, CYBIKO_CLOCK_HZ);
+    keyboard_init(&emu->keyboard, CYBIKO_KEYBOARD_COLUMNS);
+
+    /* Initialize CPU (needs bus already wired) */
+    h8s_cpu_init(&emu->cpu, &emu->bus);
+
+    /* Wire CPU back into bus (for interrupt delivery, etc.) */
+    emu->bus.cpu = &emu->cpu;
+
+    emu->running = true;
+
+    return emu;
+}
+
+void cybiko_destroy(cybiko_emu_t *emu) {
+    if (!emu) return;
+    memory_free(&emu->bus.boot_rom);
+    memory_free(&emu->bus.external_ram);
+    memory_free(&emu->bus.flash_rom);
+    memory_free(&emu->bus.on_chip_ram);
+    free(emu);
+}
+
+/* ---------- ROM / NVRAM loading ---------- */
+
+bool cybiko_load_boot_rom(cybiko_emu_t *emu, const uint8_t *data, size_t len) {
+    memory_load(&emu->bus.boot_rom, data, len, 0);
+    return true;
+}
+
+bool cybiko_load_flash_rom(cybiko_emu_t *emu, const uint8_t *data, size_t len) {
+    memory_load(&emu->bus.flash_rom, data, len, 0);
+    return true;
+}
+
+bool cybiko_load_nvram(cybiko_emu_t *emu, const uint8_t *data, size_t len) {
+    memory_load(&emu->bus.external_ram, data, len, 0);
+    return true;
+}
+
+/* ---------- reset ---------- */
+
+void cybiko_reset(cybiko_emu_t *emu) {
+    h8s_cpu_reset(&emu->cpu);
+}
+
+/* ---------- main frame loop ---------- */
+
+void cybiko_run_frame(cybiko_emu_t *emu) {
+    /* Poll keyboard state from the HAL */
+    if (emu->hal.keyboard_poll) {
+        emu->hal.keyboard_poll(emu->hal.ctx,
+                               emu->keyboard.columns,
+                               CYBIKO_KEYBOARD_COLUMNS);
+    }
+
+    /* Cache which timers are running to avoid per-cycle checks */
+    bool t8_0 = timer8_is_running(&emu->timer8[0]);
+    bool t8_1 = timer8_is_running(&emu->timer8[1]);
+    bool t16[6];
+    for (int i = 0; i < 6; i++) {
+        t16[i] = timer16_is_running(&emu->timer16[i]);
+    }
+
+    /* Execute one frame worth of CPU cycles */
+    for (int cycle = 0; cycle < CYBIKO_CYCLES_PER_FRAME; cycle++) {
+        /* Tick timers */
+        if (t8_0) timer8_tick(&emu->timer8[0]);
+        if (t8_1) timer8_tick(&emu->timer8[1]);
+        for (int i = 0; i < 6; i++) {
+            if (t16[i]) timer16_tick(&emu->timer16[i]);
+        }
+
+        /* CPU step */
+        h8s_cpu_step(&emu->cpu);
+
+        /* DMA completion */
+        bus_tick_dma_completion(&emu->bus);
+
+        emu->total_steps++;
+    }
+
+    /* Render the frame via HAL */
+    if (emu->hal.render_frame) {
+        const uint8_t *pixels = hd66421_render(&emu->lcd);
+        emu->hal.render_frame(emu->hal.ctx, pixels,
+                              CYBIKO_LCD_WIDTH, CYBIKO_LCD_HEIGHT);
+    }
+
+    /* Generate audio samples for this frame */
+    if (emu->hal.audio_output) {
+        uint8_t audio_buf[8192];
+        int samples = speaker_generate_samples(&emu->speaker,
+                                               CYBIKO_CYCLES_PER_FRAME,
+                                               audio_buf, sizeof(audio_buf));
+        if (samples > 0) {
+            emu->hal.audio_output(emu->hal.ctx, audio_buf, samples);
+        }
+    }
+
+    /* Tick RTC once per frame */
+    bus_tick_rtc(&emu->bus);
+
+    /* Drain serial output buffers to the HAL */
+    if (emu->hal.serial_output) {
+        for (int ch = 0; ch < 3; ch++) {
+            for (int i = 0; i < emu->bus.sci_output_pos[ch]; i++) {
+                emu->hal.serial_output(emu->hal.ctx,
+                                       (uint8_t)emu->bus.sci_output[ch][i]);
+            }
+            emu->bus.sci_output_pos[ch] = 0;
+        }
+    }
+
+    emu->frame_count++;
+}
+
+/* ---------- queries ---------- */
+
+bool cybiko_is_running(const cybiko_emu_t *emu) {
+    return emu->running && !emu->cpu.halted;
+}
+
+const uint8_t *cybiko_get_nvram(const cybiko_emu_t *emu, size_t *len) {
+    if (len) *len = emu->bus.external_ram.size;
+    return memory_raw((memory_t *)&emu->bus.external_ram);
+}
