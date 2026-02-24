@@ -28,6 +28,42 @@ The Cybiko XT keyboard matrix has 10 scan columns (0-9). CyOS scans these via DM
 
 The `keyboard_read()` function scans only columns 0-9 (`CYBIKO_KEYBOARD_SCAN_COLS = 10`). The array is sized to 15 for HAL communication but only 10 columns are scanned.
 
+## Audio / Speaker Fix (Critical)
+
+The Cybiko XT generates audio using Timer16 channel 1's hardware output compare (TIOCB1 = Port 1 bit 3 = speaker pin). CyOS does NOT manually toggle the speaker via CPU port writes - it configures the timer to produce PWM waveforms automatically.
+
+**Timer configuration observed from CyOS:**
+- `TIOR=0x50` → IOB=5 (`0101`): initial output HIGH, go LOW on TGRB match
+- `TCR=0x32` → prescaler ÷16, counter clears on TGRA match
+- TGRA defines the period, TGRB ≈ TGRA/2 for 50% duty cycle square wave
+- Different TGRA values = different musical note frequencies
+
+**PWM waveform generation:**
+1. Timer starts / counter clears → output goes to initial level (HIGH)
+2. Counter reaches TGRB → output goes LOW (compare match action)
+3. Counter reaches TGRA → counter clears → output returns to initial level (HIGH)
+4. Repeat → square wave at frequency = clock / prescaler / TGRA
+
+**Implementation details:**
+- `timer16.c`: TIOR nibble encoding: bit 2 = initial level, bits 1-0 = match action (01=clear, 10=set, 11=toggle)
+- `timer16.c`: `set_output_b()` fires callback on level change; callback wired to `speaker_set_level()` in `emulator.c`
+- `timer16.c`: On counter clear (TGRA match with clear_mode=1), output B resets to initial level
+- `speaker.c`: Tracks per-cycle transitions within each frame for accurate waveform reconstruction
+- `speaker.h`: Sample rate = 48000 Hz (matches web emulator)
+- No-transition frames output silence (128) instead of DC offset (96/160)
+
+**Key bug that was fixed:** Output compare pin level was initialized to 0, so "set LOW on match" was a no-op. Combined with missing "reset to initial level on counter clear", no audio was generated.
+
+## App Loading
+
+The `--app` flag injects `.app` files into the CFS filesystem before boot:
+```bash
+./cybiko-emu boot.bin flash.bin --nvram save.nvram --app game.app --app tool.app
+```
+- If NVRAM exists, loads it as the CFS base; otherwise formats fresh CFS
+- Uses `cfs_add_file()` to inject each app by filename
+- CFS image (524,544 bytes) loaded into external RAM at offset 0
+
 ## DMA Notes
 
 - CyOS programs DMACR=0x8007: 16-bit mode, both source and destination FIXED
@@ -39,5 +75,5 @@ The `keyboard_read()` function scans only columns 0-9 (`CYBIKO_KEYBOARD_SCAN_COL
 
 ```bash
 cd build && cmake .. && cmake --build .
-./cybiko-emu <boot.bin> <flash.bin> [--nvram file.nvram]
+./cybiko-emu <boot.bin> <flash.bin> [--nvram file.nvram] [--app file.app ...] [--trace]
 ```

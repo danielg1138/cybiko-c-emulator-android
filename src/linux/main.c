@@ -3,7 +3,7 @@
  *
  * Boots the Cybiko XT emulator with SDL2 display, keyboard, and audio.
  *
- * Usage: ./cybiko-emu <boot.bin> <flash.bin> [--nvram file.nvram] [--trace]
+ * Usage: ./cybiko-emu <boot.bin> <flash.bin> [--nvram file] [--app file.app ...] [--trace]
  */
 
 #include <errno.h>
@@ -12,6 +12,8 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 #include "core/emulator.h"
+#include "core/speaker.h"
+#include "core/cfs.h"
 
 /* ---------------------------------------------------------------------------
  * SDL context - holds handles needed by HAL callbacks
@@ -434,7 +436,7 @@ int main(int argc, char *argv[])
 {
     /* ---- Parse command-line arguments ---- */
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <boot.bin> <flash.bin> [--nvram file] [--trace]\n",
+        fprintf(stderr, "Usage: %s <boot.bin> <flash.bin> [--nvram file] [--app file.app ...] [--trace]\n",
                 argv[0]);
         return 1;
     }
@@ -442,11 +444,20 @@ int main(int argc, char *argv[])
     const char *boot_path  = argv[1];
     const char *flash_path = argv[2];
     const char *nvram_path = NULL;
+    const char *app_paths[64];
+    int app_count = 0;
     bool trace = false;
 
     for (int i = 3; i < argc; i++) {
         if (strcmp(argv[i], "--nvram") == 0 && i + 1 < argc) {
             nvram_path = argv[++i];
+        } else if (strcmp(argv[i], "--app") == 0 && i + 1 < argc) {
+            if (app_count < 64) {
+                app_paths[app_count++] = argv[++i];
+            } else {
+                fprintf(stderr, "Warning: too many --app arguments (max 64)\n");
+                i++;
+            }
         } else if (strcmp(argv[i], "--trace") == 0) {
             trace = true;
         } else {
@@ -532,7 +543,7 @@ int main(int argc, char *argv[])
     /* ---- Open audio device ---- */
     SDL_AudioSpec want, have;
     SDL_zero(want);
-    want.freq     = 44100;
+    want.freq     = SPEAKER_SAMPLE_RATE;
     want.format   = AUDIO_U8;
     want.channels = 1;
     want.samples  = 2048;
@@ -602,7 +613,61 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (nvram_data) {
+    /* ---- Load NVRAM and inject app files into CFS ---- */
+    if (app_count > 0) {
+        /* Build a CFS image with app files injected */
+        cfs_image_t *cfs = malloc(sizeof(cfs_image_t));
+        if (!cfs) {
+            fprintf(stderr, "Error: out of memory for CFS image\n");
+            cybiko_destroy(emu);
+            if (audio_dev) SDL_CloseAudioDevice(audio_dev);
+            SDL_DestroyTexture(texture);
+            SDL_DestroyRenderer(renderer);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            free(boot_data);
+            free(flash_data);
+            free(nvram_data);
+            return 1;
+        }
+
+        if (nvram_data && nvram_size >= CFS_IMAGE_SIZE) {
+            /* Load existing NVRAM as CFS image */
+            memcpy(cfs->data, nvram_data, CFS_IMAGE_SIZE);
+        } else {
+            /* Format a fresh CFS filesystem */
+            cfs_format(cfs);
+            if (nvram_data) {
+                fprintf(stderr, "Note: NVRAM too small for CFS, formatting fresh\n");
+            }
+        }
+
+        /* Add each app file */
+        for (int i = 0; i < app_count; i++) {
+            size_t app_size = 0;
+            uint8_t *app_data = load_file(app_paths[i], &app_size);
+            if (!app_data) {
+                fprintf(stderr, "Warning: skipping app '%s'\n", app_paths[i]);
+                continue;
+            }
+
+            /* Extract filename from path */
+            const char *app_name = strrchr(app_paths[i], '/');
+            app_name = app_name ? app_name + 1 : app_paths[i];
+
+            if (cfs_add_file(cfs, app_name, app_data, app_size)) {
+                fprintf(stderr, "Added app '%s' (%zu bytes)\n", app_name, app_size);
+            } else {
+                fprintf(stderr, "Warning: failed to add app '%s' (filesystem full?)\n",
+                        app_name);
+            }
+            free(app_data);
+        }
+
+        /* Load CFS image into external RAM */
+        cybiko_load_nvram(emu, cfs->data, CFS_IMAGE_SIZE);
+        free(cfs);
+    } else if (nvram_data) {
         if (!cybiko_load_nvram(emu, nvram_data, nvram_size)) {
             fprintf(stderr, "Warning: failed to load NVRAM data\n");
         }

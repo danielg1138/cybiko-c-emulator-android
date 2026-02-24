@@ -35,6 +35,12 @@ struct cybiko_emu {
     uint32_t frame_count;
 };
 
+/* Timer16 channel 1 TIOCB1 output compare → speaker (Port 1 bit 3) */
+static void timer16_ch1_tiocb_cb(void *ctx, int level) {
+    cybiko_emu_t *emu = ctx;
+    speaker_set_level(&emu->speaker, level);
+}
+
 /* ---------- lifecycle ---------- */
 
 cybiko_emu_t *cybiko_create(const cybiko_hal_t *hal) {
@@ -77,6 +83,10 @@ cybiko_emu_t *cybiko_create(const cybiko_hal_t *hal) {
     timer16_init(&emu->timer16[3], 3, 4, 48, &emu->cpu);
     timer16_init(&emu->timer16[4], 4, 2, 56, &emu->cpu);
     timer16_init(&emu->timer16[5], 5, 2, 60, &emu->cpu);
+
+    /* Wire Timer16 ch1 TIOCB1 output compare to speaker */
+    emu->timer16[1].output_b_cb = timer16_ch1_tiocb_cb;
+    emu->timer16[1].output_b_ctx = emu;
 
     rtc_init(&emu->rtc);
     speaker_init(&emu->speaker, CYBIKO_CLOCK_HZ);
@@ -143,8 +153,14 @@ void cybiko_run_frame(cybiko_emu_t *emu) {
         t16[i] = timer16_is_running(&emu->timer16[i]);
     }
 
+    /* Begin speaker frame (record start level, reset transitions) */
+    speaker_begin_frame(&emu->speaker);
+
     /* Execute one frame worth of CPU cycles */
     for (int cycle = 0; cycle < CYBIKO_CYCLES_PER_FRAME; cycle++) {
+        /* Track cycle position for speaker transition timestamps */
+        emu->speaker.frame_cycle = cycle;
+
         /* Tick timers */
         if (t8_0) timer8_tick(&emu->timer8[0]);
         if (t8_1) timer8_tick(&emu->timer8[1]);

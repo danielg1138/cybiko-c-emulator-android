@@ -4,6 +4,9 @@
 
 typedef struct h8s_cpu h8s_cpu_t;
 
+/* Callback for timer output compare pin changes */
+typedef void (*timer16_output_cb)(void *ctx, int level);
+
 typedef struct {
     uint8_t  tcr, tmdr, tior, tier, tsr;
     uint16_t tcnt, tgra, tgrb;
@@ -14,6 +17,12 @@ typedef struct {
     int      vec_tgia, vec_tgib, vec_ovf;
     const int *clock_divisors;
     h8s_cpu_t *cpu;
+
+    /* Output compare pin state (TIOCA/TIOCB) */
+    int      output_a_level;
+    int      output_b_level;
+    timer16_output_cb output_b_cb;  /* Called when TIOCB pin changes */
+    void             *output_b_ctx;
 } timer16_t;
 
 void     timer16_init(timer16_t *t, int channel, int tgr_count, int base_vector, h8s_cpu_t *cpu);

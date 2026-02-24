@@ -3,6 +3,28 @@
  *
  * Each channel has TCR, TMDR, TIOR, TIER, TSR, TCNT (16-bit), TGRA, TGRB.
  * Clock source mapping is per-channel (from MAME h8s2319.cpp).
+ *
+ * TIOR (Timer I/O Control Register) controls output compare pin behavior:
+ *   For channels with 2 TGR: bits 3-0 = IOA, bits 7-4 = IOB
+ *   IOx nibble encoding:
+ *     0000 = disabled
+ *     0001 = initial LOW,  output LOW  on match
+ *     0010 = initial LOW,  output HIGH on match
+ *     0011 = initial LOW,  toggle on match
+ *     0100 = disabled
+ *     0101 = initial HIGH, output LOW  on match
+ *     0110 = initial HIGH, output HIGH on match
+ *     0111 = initial HIGH, toggle on match
+ *     1xxx = input capture (no output)
+ *
+ * PWM behavior: when counter clears on TGRA match (clear_mode=1),
+ * the TIOCB output returns to its initial level. Combined with TGRB
+ * compare match action, this creates a PWM waveform:
+ *   counter=0..TGRB: initial level
+ *   counter=TGRB..TGRA: compare match level
+ *   counter clears: back to initial level
+ *
+ * Channel 1 TIOCB1 = Port 1 bit 3 = speaker output on Cybiko XT.
  */
 #include "core/timer16.h"
 #include "core/h8s_cpu.h"
@@ -38,6 +60,40 @@ static void update_cached_divisor(timer16_t *t) {
     }
 }
 
+/*
+ * Get the initial output level from a TIOR nibble.
+ * Returns 0 (LOW), 1 (HIGH), or -1 (output disabled/input capture).
+ */
+static int tior_initial_level(int nibble) {
+    if (nibble & 0x08) return -1;      /* Input capture */
+    if ((nibble & 0x03) == 0) return -1; /* Disabled */
+    return (nibble & 0x04) ? 1 : 0;    /* Bit 2 = initial level */
+}
+
+/*
+ * Get the output level after a compare match.
+ * Returns 0, 1, or -1 (no output change).
+ */
+static int tior_match_level(int nibble, int current_level) {
+    if (nibble & 0x08) return -1;  /* Input capture */
+    switch (nibble & 0x03) {
+    case 1:  return 0;                   /* Clear (LOW) */
+    case 2:  return 1;                   /* Set (HIGH) */
+    case 3:  return current_level ^ 1;   /* Toggle */
+    default: return -1;                  /* Disabled */
+    }
+}
+
+/* Update output B level and fire callback if changed */
+static void set_output_b(timer16_t *t, int new_level) {
+    if (new_level >= 0 && new_level != t->output_b_level) {
+        t->output_b_level = new_level;
+        if (t->output_b_cb) {
+            t->output_b_cb(t->output_b_ctx, new_level);
+        }
+    }
+}
+
 void timer16_init(timer16_t *t, int channel, int tgr_count, int base_vector, h8s_cpu_t *cpu) {
     t->tcr   = 0;
     t->tmdr  = 0;
@@ -56,6 +112,10 @@ void timer16_init(timer16_t *t, int channel, int tgr_count, int base_vector, h8s
     t->vec_tgib = base_vector + 1;
     t->vec_ovf  = base_vector + tgr_count;
     t->cpu = cpu;
+    t->output_a_level = 0;
+    t->output_b_level = 0;
+    t->output_b_cb = NULL;
+    t->output_b_ctx = NULL;
 
     if (channel >= 0 && channel < 6) {
         t->clock_divisors = channel_clock_divisors[channel];
@@ -103,6 +163,8 @@ void timer16_write8(timer16_t *t, int reg, uint8_t value) {
         break;
     case 2:
         t->tior = value;
+        /* Set output pins to initial level when TIOR is configured */
+        set_output_b(t, tior_initial_level((value >> 4) & 0x0F));
         break;
     case 4:
         t->tier = value;
@@ -155,6 +217,10 @@ void timer16_write16(timer16_t *t, int reg, uint16_t value) {
 void timer16_set_enabled(timer16_t *t, bool enabled) {
     t->enabled = enabled;
     update_cached_divisor(t);
+    /* When timer starts, ensure output is at initial level */
+    if (enabled) {
+        set_output_b(t, tior_initial_level((t->tior >> 4) & 0x0F));
+    }
 }
 
 void timer16_tick(timer16_t *t) {
@@ -175,9 +241,18 @@ void timer16_tick(timer16_t *t) {
         if (!was_set && (t->tier & TIER_TGIEA)) {
             h8s_cpu_request_interrupt(t->cpu, t->vec_tgia);
         }
-        /* Clear on compare match A if configured */
+        /* Output compare A: TIOR bits 3-0 */
+        int new_a = tior_match_level(t->tior & 0x0F, t->output_a_level);
+        if (new_a >= 0) {
+            t->output_a_level = new_a;
+        }
+        /* Clear on compare match A */
         int clear_mode = (t->tcr >> 5) & 0x03;
-        if (clear_mode == 1) t->tcnt = 0;
+        if (clear_mode == 1) {
+            t->tcnt = 0;
+            /* PWM: when counter clears, output B returns to initial level */
+            set_output_b(t, tior_initial_level((t->tior >> 4) & 0x0F));
+        }
     }
 
     /* Compare match B */
@@ -187,6 +262,9 @@ void timer16_tick(timer16_t *t) {
         if (!was_set && (t->tier & TIER_TGIEB)) {
             h8s_cpu_request_interrupt(t->cpu, t->vec_tgib);
         }
+        /* Output compare B: TIOR bits 7-4 */
+        int new_b = tior_match_level((t->tior >> 4) & 0x0F, t->output_b_level);
+        set_output_b(t, new_b);
         int clear_mode = (t->tcr >> 5) & 0x03;
         if (clear_mode == 2) t->tcnt = 0;
     }
