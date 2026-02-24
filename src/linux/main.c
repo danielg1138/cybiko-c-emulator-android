@@ -68,30 +68,122 @@ static void hal_serial_output(void *ctx, uint8_t byte)
 }
 
 /* ---------------------------------------------------------------------------
- * Keyboard mapping (placeholder - full mapping comes later)
+ * Cybiko XT keyboard mapping (from SwingRenderer.java handleKeyXT)
+ *
+ * Maps SDL scancodes to the 15-column × 16-bit matrix.
+ * PC Ctrl = Cybiko Fn, PC Home = Select, PC Insert = As,
+ * PC End = Help, PC F8 = On/Off.
  * --------------------------------------------------------------------------- */
+
+typedef struct {
+    SDL_Scancode scancode;
+    int          col;
+    uint16_t     mask;
+} key_mapping_t;
+
+static const key_mapping_t key_map[] = {
+    /* Column 0 */
+    { SDL_SCANCODE_F7,        0, 0x0001 },
+    { SDL_SCANCODE_M,         0, 0x0100 },
+    { SDL_SCANCODE_K,         0, 0x0800 },
+    { SDL_SCANCODE_I,         0, 0x1000 },
+    { SDL_SCANCODE_O,         0, 0x2000 },
+    { SDL_SCANCODE_L,         0, 0x4000 },
+
+    /* Column 1 */
+    { SDL_SCANCODE_F6,        1, 0x0001 },
+    { SDL_SCANCODE_G,         1, 0x0002 },
+    { SDL_SCANCODE_B,         1, 0x0004 },
+    { SDL_SCANCODE_N,         1, 0x0008 },
+    { SDL_SCANCODE_H,         1, 0x0010 },
+    { SDL_SCANCODE_Y,         1, 0x0020 },
+    { SDL_SCANCODE_U,         1, 0x0040 },
+    { SDL_SCANCODE_J,         1, 0x0080 },
+
+    /* Column 2 */
+    { SDL_SCANCODE_F5,        2, 0x0001 },
+    { SDL_SCANCODE_D,         2, 0x0100 },
+    { SDL_SCANCODE_C,         2, 0x0200 },
+    { SDL_SCANCODE_V,         2, 0x0800 },
+    { SDL_SCANCODE_F,         2, 0x1000 },
+    { SDL_SCANCODE_R,         2, 0x2000 },
+    { SDL_SCANCODE_T,         2, 0x4000 },
+
+    /* Column 3 */
+    { SDL_SCANCODE_F4,        3, 0x0001 },
+    { SDL_SCANCODE_Q,         3, 0x0002 },
+    { SDL_SCANCODE_A,         3, 0x0004 },
+    { SDL_SCANCODE_Z,         3, 0x0008 },
+    { SDL_SCANCODE_X,         3, 0x0010 },
+    { SDL_SCANCODE_S,         3, 0x0020 },
+    { SDL_SCANCODE_W,         3, 0x0040 },
+    { SDL_SCANCODE_E,         3, 0x0080 },
+
+    /* Column 4 */
+    { SDL_SCANCODE_F3,        4, 0x0001 },
+    { SDL_SCANCODE_RETURN,    4, 0x0008 },
+    { SDL_SCANCODE_HOME,      4, 0x0010 },  /* Select */
+    { SDL_SCANCODE_SPACE,     4, 0x0040 },
+
+    /* Column 5 */
+    { SDL_SCANCODE_F2,        5, 0x0001 },
+    { SDL_SCANCODE_TAB,       5, 0x0080 },
+    { SDL_SCANCODE_BACKSPACE, 5, 0x0100 },
+    { SDL_SCANCODE_DELETE,    5, 0x0100 },
+    { SDL_SCANCODE_INSERT,    5, 0x0200 },  /* As */
+    { SDL_SCANCODE_ESCAPE,    5, 0x0400 },
+
+    /* Column 6 - arrows */
+    { SDL_SCANCODE_F1,        6, 0x0001 },
+    { SDL_SCANCODE_UP,        6, 0x0800 },
+    { SDL_SCANCODE_RIGHT,     6, 0x1000 },
+    { SDL_SCANCODE_DOWN,      6, 0x2000 },
+    { SDL_SCANCODE_LEFT,      6, 0x4000 },
+
+    /* Column 7 - Fn (mapped to Ctrl) */
+    { SDL_SCANCODE_LCTRL,     7, 0x8000 },
+    { SDL_SCANCODE_RCTRL,     7, 0x8000 },
+
+    /* Column 8 - Shift */
+    { SDL_SCANCODE_LSHIFT,    8, 0x8000 },
+    { SDL_SCANCODE_RSHIFT,    8, 0x8000 },
+
+    /* Column 13 */
+    { SDL_SCANCODE_END,      13, 0x0001 },  /* Help */
+    { SDL_SCANCODE_PERIOD,   13, 0x0002 },
+    { SDL_SCANCODE_P,        13, 0x0010 },
+
+    /* Column 14 - On/Off */
+    { SDL_SCANCODE_F8,       14, 0x8000 },
+
+    /* Number keys mapped to Fn+letter positions for convenience */
+    { SDL_SCANCODE_1,         3, 0x0002 },  /* same as Q */
+    { SDL_SCANCODE_2,         3, 0x0040 },  /* same as W */
+    { SDL_SCANCODE_3,         3, 0x0080 },  /* same as E */
+    { SDL_SCANCODE_4,         2, 0x2000 },  /* same as R */
+    { SDL_SCANCODE_5,         2, 0x4000 },  /* same as T */
+    { SDL_SCANCODE_6,         1, 0x0020 },  /* same as Y */
+    { SDL_SCANCODE_7,         1, 0x0040 },  /* same as U */
+    { SDL_SCANCODE_8,         0, 0x1000 },  /* same as I */
+    { SDL_SCANCODE_9,         0, 0x2000 },  /* same as O */
+    { SDL_SCANCODE_0,        13, 0x0010 },  /* same as P */
+};
+
+static const int KEY_MAP_COUNT = sizeof(key_map) / sizeof(key_map[0]);
 
 static void update_key_matrix(sdl_ctx_t *sdl, SDL_KeyboardEvent *key)
 {
     bool pressed = (key->type == SDL_KEYDOWN);
-    int col = -1;
-    uint16_t mask = 0;
+    SDL_Scancode sc = key->keysym.scancode;
 
-    switch (key->keysym.scancode) {
-        case SDL_SCANCODE_UP:     col =  9; mask = 0x0002; break;
-        case SDL_SCANCODE_DOWN:   col = 10; mask = 0x0002; break;
-        case SDL_SCANCODE_LEFT:   col = 11; mask = 0x0002; break;
-        case SDL_SCANCODE_RIGHT:  col = 12; mask = 0x0002; break;
-        case SDL_SCANCODE_RETURN: col =  8; mask = 0x0002; break;
-        case SDL_SCANCODE_ESCAPE: col = 13; mask = 0x0002; break;
-        default: break;
-    }
-
-    if (col >= 0 && col < CYBIKO_KEYBOARD_COLUMNS) {
-        if (pressed)
-            sdl->key_matrix[col] |= mask;
-        else
-            sdl->key_matrix[col] &= ~mask;
+    for (int i = 0; i < KEY_MAP_COUNT; i++) {
+        if (key_map[i].scancode == sc) {
+            if (pressed)
+                sdl->key_matrix[key_map[i].col] |= key_map[i].mask;
+            else
+                sdl->key_matrix[key_map[i].col] &= ~key_map[i].mask;
+            return;
+        }
     }
 }
 
