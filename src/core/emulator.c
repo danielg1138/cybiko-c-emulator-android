@@ -80,7 +80,7 @@ cybiko_emu_t *cybiko_create(const cybiko_hal_t *hal) {
 
     rtc_init(&emu->rtc);
     speaker_init(&emu->speaker, CYBIKO_CLOCK_HZ);
-    keyboard_init(&emu->keyboard, CYBIKO_KEYBOARD_COLUMNS);
+    keyboard_init(&emu->keyboard, CYBIKO_KEYBOARD_SCAN_COLS);
 
     /* Initialize CPU (needs bus already wired) */
     h8s_cpu_init(&emu->cpu, &emu->bus);

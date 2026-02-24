@@ -273,7 +273,8 @@ uint16_t bus_read16(address_bus_t *bus, uint32_t address)
     case REGION_FLASH:
         return memory_read16(&bus->flash_rom, flash_offset(address));
     case REGION_KEYBOARD:
-        return bus->keyboard ? keyboard_read(bus->keyboard, address) : 0xFFFF;
+        if (!bus->keyboard) return 0xFFFF;
+        return keyboard_read(bus->keyboard, address);
     case REGION_ON_CHIP:
         return read_on_chip16(bus, address);
     case REGION_UNMAPPED:
@@ -643,7 +644,16 @@ static void execute_dma_transfer(address_bus_t *bus, int channel)
     int count = (bus->dma_regs[base + 6] << 8) | bus->dma_regs[base + 7];
 
     uint8_t dmacr_h = bus->dma_ctrl[2 + channel * 2];
-    bool mode16 = (dmacr_h & 0x80) != 0;
+    uint8_t dmacr_l = bus->dma_ctrl[3 + channel * 2];
+    bool mode16    = (dmacr_h & 0x80) != 0;  /* Bit 15: transfer size      */
+    bool src_dec   = (dmacr_h & 0x40) != 0;  /* Bit 14: source decrement   */
+    bool src_inc   = (dmacr_h & 0x20) != 0;  /* Bit 13: source inc enable  */
+    bool dst_dec   = (dmacr_l & 0x40) != 0;  /* Bit  6: dest decrement     */
+    bool dst_inc   = (dmacr_l & 0x20) != 0;  /* Bit  5: dest inc enable    */
+
+    int step = mode16 ? 2 : 1;
+    int src_step = src_inc ? (src_dec ? -step : step) : 0;
+    int dst_step = dst_inc ? (dst_dec ? -step : step) : 0;
 
     src_addr &= 0xFFFFFF;
     dst_addr &= 0xFFFFFF;
@@ -654,23 +664,24 @@ static void execute_dma_transfer(address_bus_t *bus, int channel)
         return;
     }
 
-    (void)0; /* DMA transfer - logging suppressed */
-
+    bus->in_dma = true;
     if (mode16) {
         for (int i = 0; i < count; i++) {
             uint16_t val = bus_read16(bus, src_addr);
             bus_write16(bus, dst_addr, val);
-            src_addr = (src_addr + 2) & 0xFFFFFF;
-            dst_addr = (dst_addr + 2) & 0xFFFFFF;
+            src_addr = (src_addr + src_step) & 0xFFFFFF;
+            dst_addr = (dst_addr + dst_step) & 0xFFFFFF;
         }
     } else {
         for (int i = 0; i < count; i++) {
             uint8_t val = bus_read8(bus, src_addr);
             bus_write8(bus, dst_addr, val);
-            src_addr = (src_addr + 1) & 0xFFFFFF;
-            dst_addr = (dst_addr + 1) & 0xFFFFFF;
+            src_addr = (src_addr + src_step) & 0xFFFFFF;
+            dst_addr = (dst_addr + dst_step) & 0xFFFFFF;
         }
     }
+
+    bus->in_dma = false;
 
     /* Clear trigger bits and count */
     if (channel == 1) bus->dma_ctrl[7] &= ~0xC0;

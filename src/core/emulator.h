@@ -20,6 +20,7 @@ const uint8_t *cybiko_get_nvram(const cybiko_emu_t *emu, size_t *len);
 #define CYBIKO_CLOCK_HZ    18432000
 #define CYBIKO_FPS         60
 #define CYBIKO_CYCLES_PER_FRAME (CYBIKO_CLOCK_HZ / CYBIKO_FPS)
-#define CYBIKO_KEYBOARD_COLUMNS 15
+#define CYBIKO_KEYBOARD_COLUMNS 15  /* total matrix entries (HAL copies all) */
+#define CYBIKO_KEYBOARD_SCAN_COLS 10 /* columns scanned by keyboard_read (0-9) */
 
 #endif

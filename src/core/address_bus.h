@@ -52,6 +52,7 @@ typedef struct address_bus {
     int     unmapped_log_count;
     int     io_fallthrough_log;
     int     dma_debug_log;
+    bool    in_dma;  /* true during DMA transfers */
 } address_bus_t;
 
 void     bus_init(address_bus_t *bus);

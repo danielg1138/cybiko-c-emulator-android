@@ -41,6 +41,7 @@ typedef struct {
     int      pending_col[MAX_PENDING_LETTERS];
     uint16_t pending_mask[MAX_PENDING_LETTERS];
     int      pending_delay[MAX_PENDING_LETTERS];
+    bool     pending_auto_release[MAX_PENDING_LETTERS];
     int      pending_count;
     int      fn_held_count;
     bool     fn_held;
@@ -116,6 +117,7 @@ static const key_mapping_t key_map[] = {
     { SDL_SCANCODE_K,         0, 0x0800 },
     { SDL_SCANCODE_I,         0, 0x1000 },
     { SDL_SCANCODE_O,         0, 0x2000 },
+    { SDL_SCANCODE_COMMA,     0, 0x0400 },
     { SDL_SCANCODE_L,         0, 0x4000 },
     /* Column 1 */
     { SDL_SCANCODE_F6,        1, 0x0001 },
@@ -167,12 +169,11 @@ static const key_mapping_t key_map[] = {
     /* Column 8 - Shift */
     { SDL_SCANCODE_LSHIFT,    8, 0x8000 },
     { SDL_SCANCODE_RSHIFT,    8, 0x8000 },
-    /* Column 13 */
-    { SDL_SCANCODE_END,      13, 0x0001 },  /* Help */
-    { SDL_SCANCODE_PERIOD,   13, 0x0002 },
-    { SDL_SCANCODE_P,        13, 0x0010 },
-    /* Column 14 - On/Off */
-    { SDL_SCANCODE_F8,       14, 0x8000 },
+    /* Column 9 - P, period, Help, semicolon (per web emulator) */
+    { SDL_SCANCODE_END,       9, 0x0001 },  /* Help */
+    { SDL_SCANCODE_PERIOD,    9, 0x0002 },
+    { SDL_SCANCODE_SEMICOLON, 9, 0x0008 },
+    { SDL_SCANCODE_P,         9, 0x0010 },
 };
 
 /* Number key -> Fn+letter mapping (col and mask of the letter) */
@@ -186,7 +187,7 @@ static const key_mapping_t num_key_map[] = {
     { SDL_SCANCODE_7,   1, 0x0040 },  /* Fn+U */
     { SDL_SCANCODE_8,   0, 0x1000 },  /* Fn+I */
     { SDL_SCANCODE_9,   0, 0x2000 },  /* Fn+O */
-    { SDL_SCANCODE_0,  13, 0x0010 },  /* Fn+P */
+    { SDL_SCANCODE_0,   9, 0x0010 },  /* Fn+P */
 };
 
 static const int KEY_MAP_COUNT = sizeof(key_map) / sizeof(key_map[0]);
@@ -245,6 +246,7 @@ static void queue_pending_letter(sdl_ctx_t *sdl, int col, uint16_t mask, int del
     for (int i = 0; i < sdl->pending_count; i++) {
         if (sdl->pending_col[i] == col && sdl->pending_mask[i] == mask) {
             sdl->pending_delay[i] = delay;
+            sdl->pending_auto_release[i] = false;
             return;
         }
     }
@@ -253,22 +255,25 @@ static void queue_pending_letter(sdl_ctx_t *sdl, int col, uint16_t mask, int del
         sdl->pending_col[n]   = col;
         sdl->pending_mask[n]  = mask;
         sdl->pending_delay[n] = delay;
+        sdl->pending_auto_release[n] = false;
     }
 }
 
-static void remove_pending_letter(sdl_ctx_t *sdl, int col, uint16_t mask)
+static void mark_pending_auto_release(sdl_ctx_t *sdl, int col, uint16_t mask)
 {
     for (int i = 0; i < sdl->pending_count; i++) {
         if (sdl->pending_col[i] == col && sdl->pending_mask[i] == mask) {
-            sdl->pending_count--;
-            if (i < sdl->pending_count) {
-                sdl->pending_col[i]   = sdl->pending_col[sdl->pending_count];
-                sdl->pending_mask[i]  = sdl->pending_mask[sdl->pending_count];
-                sdl->pending_delay[i] = sdl->pending_delay[sdl->pending_count];
-            }
+            sdl->pending_auto_release[i] = true;
             return;
         }
     }
+}
+
+static bool is_pending(sdl_ctx_t *sdl, int col, uint16_t mask)
+{
+    for (int i = 0; i < sdl->pending_count; i++)
+        if (sdl->pending_col[i] == col && sdl->pending_mask[i] == mask) return true;
+    return false;
 }
 
 static void set_fn_letter(sdl_ctx_t *sdl, int col, uint16_t mask, bool pressed)
@@ -284,8 +289,13 @@ static void set_fn_letter(sdl_ctx_t *sdl, int col, uint16_t mask, bool pressed)
             queue_pending_letter(sdl, col, mask, FN_NEXT_DELAY);
         }
     } else {
-        sdl->key_matrix[col] &= ~mask;
-        remove_pending_letter(sdl, col, mask);
+        if (is_pending(sdl, col, mask)) {
+            /* Letter hasn't fired yet - let it fire and auto-release */
+            mark_pending_auto_release(sdl, col, mask);
+        } else {
+            /* Letter already fired - clear it normally */
+            sdl->key_matrix[col] &= ~mask;
+        }
         if (sdl->fn_held_count > 0) sdl->fn_held_count--;
         if (sdl->fn_held_count == 0 && sdl->fn_held) {
             sdl->fn_release_countdown = FN_RELEASE_DELAY;
@@ -310,14 +320,30 @@ static void keyboard_tick_frame(sdl_ctx_t *sdl)
     /* Process pending Fn+letter presses */
     for (int i = 0; i < sdl->pending_count; i++) {
         if (--sdl->pending_delay[i] <= 0) {
-            sdl->key_matrix[sdl->pending_col[i]] |= sdl->pending_mask[i];
+            int col = sdl->pending_col[i];
+            uint16_t mask = sdl->pending_mask[i];
+            bool auto_rel = sdl->pending_auto_release[i];
+
+            sdl->key_matrix[col] |= mask;
+
+            /* Remove from pending queue */
             sdl->pending_count--;
             if (i < sdl->pending_count) {
                 sdl->pending_col[i]   = sdl->pending_col[sdl->pending_count];
                 sdl->pending_mask[i]  = sdl->pending_mask[sdl->pending_count];
                 sdl->pending_delay[i] = sdl->pending_delay[sdl->pending_count];
+                sdl->pending_auto_release[i] = sdl->pending_auto_release[sdl->pending_count];
             }
             i--;
+
+            /* If key was already released, auto-release via held mechanism */
+            if (auto_rel && sdl->held_count < MAX_HELD_KEYS) {
+                int n = sdl->held_count++;
+                sdl->held_col[n]    = col;
+                sdl->held_mask[n]   = mask;
+                sdl->held_frames[n] = MIN_HOLD_FRAMES;
+                sdl->held_release_pending[n] = true;
+            }
         }
     }
 
@@ -335,6 +361,9 @@ static void keyboard_tick_frame(sdl_ctx_t *sdl)
 
 static void update_key_matrix(sdl_ctx_t *sdl, SDL_KeyboardEvent *key)
 {
+    /* Filter OS-level key repeat - emulated system handles its own repeat */
+    if (key->repeat) return;
+
     bool pressed = (key->type == SDL_KEYDOWN);
     SDL_Scancode sc = key->keysym.scancode;
 
