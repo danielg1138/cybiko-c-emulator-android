@@ -34,3 +34,13 @@ else()
     target_link_libraries(cybiko-emu cybiko_core ${SDL2_LIBRARIES})
     target_include_directories(cybiko-emu PRIVATE ${SDL2_INCLUDE_DIRS})
 endif()
+
+# Tests
+enable_testing()
+set(TEST_MODULES memory cfs keyboard timer8 timer16 speaker hd66421 h8s_cpu)
+foreach(mod ${TEST_MODULES})
+    add_executable(test_${mod} tests/test_${mod}.c)
+    target_link_libraries(test_${mod} cybiko_core)
+    target_include_directories(test_${mod} PRIVATE tests)
+    add_test(NAME ${mod} COMMAND test_${mod})
+endforeach()
