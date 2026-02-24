@@ -1,0 +1,1 @@
+/* Cybiko flash filesystem - stub */

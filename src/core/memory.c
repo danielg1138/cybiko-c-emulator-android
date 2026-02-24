@@ -1,0 +1,1 @@
+/* Cybiko memory subsystem - stub */

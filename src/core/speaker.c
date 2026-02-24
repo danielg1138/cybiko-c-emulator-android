@@ -1,0 +1,1 @@
+/* Cybiko speaker - stub */

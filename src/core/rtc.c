@@ -1,0 +1,1 @@
+/* Cybiko RTC - stub */
