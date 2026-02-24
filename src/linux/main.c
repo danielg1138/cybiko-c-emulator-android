@@ -17,11 +17,34 @@
  * SDL context - holds handles needed by HAL callbacks
  * --------------------------------------------------------------------------- */
 
+#define MAX_HELD_KEYS      16
+#define MAX_PENDING_LETTERS 10
+#define MIN_HOLD_FRAMES     3
+#define FN_FIRST_DELAY      4
+#define FN_NEXT_DELAY       3
+#define FN_RELEASE_DELAY   10
+
 typedef struct {
     SDL_Renderer    *renderer;
     SDL_Texture     *texture;
     SDL_AudioDeviceID audio_dev;
     uint16_t         key_matrix[CYBIKO_KEYBOARD_COLUMNS];
+
+    /* Minimum hold: keys stay pressed for at least MIN_HOLD_FRAMES */
+    int      held_col[MAX_HELD_KEYS];
+    uint16_t held_mask[MAX_HELD_KEYS];
+    int      held_frames[MAX_HELD_KEYS];
+    bool     held_release_pending[MAX_HELD_KEYS];
+    int      held_count;
+
+    /* Fn+letter for number keys: Fn pressed first, letter after delay */
+    int      pending_col[MAX_PENDING_LETTERS];
+    uint16_t pending_mask[MAX_PENDING_LETTERS];
+    int      pending_delay[MAX_PENDING_LETTERS];
+    int      pending_count;
+    int      fn_held_count;
+    bool     fn_held;
+    int      fn_release_countdown;
 } sdl_ctx_t;
 
 /* ---------------------------------------------------------------------------
@@ -68,11 +91,15 @@ static void hal_serial_output(void *ctx, uint8_t byte)
 }
 
 /* ---------------------------------------------------------------------------
- * Cybiko XT keyboard mapping (from SwingRenderer.java handleKeyXT)
+ * Cybiko XT keyboard mapping (ported from SwingRenderer.java handleKeyXT)
  *
  * Maps SDL scancodes to the 15-column × 16-bit matrix.
  * PC Ctrl = Cybiko Fn, PC Home = Select, PC Insert = As,
  * PC End = Help, PC F8 = On/Off.
+ *
+ * Two mechanisms match the Java emulator:
+ *  1. Minimum hold (3 frames) - prevents missed keys from fast press/release
+ *  2. Fn+letter timing - Fn pressed first, letter after delay, Fn held after
  * --------------------------------------------------------------------------- */
 
 typedef struct {
@@ -81,6 +108,7 @@ typedef struct {
     uint16_t     mask;
 } key_mapping_t;
 
+/* Regular key map (not number keys) */
 static const key_mapping_t key_map[] = {
     /* Column 0 */
     { SDL_SCANCODE_F7,        0, 0x0001 },
@@ -89,7 +117,6 @@ static const key_mapping_t key_map[] = {
     { SDL_SCANCODE_I,         0, 0x1000 },
     { SDL_SCANCODE_O,         0, 0x2000 },
     { SDL_SCANCODE_L,         0, 0x4000 },
-
     /* Column 1 */
     { SDL_SCANCODE_F6,        1, 0x0001 },
     { SDL_SCANCODE_G,         1, 0x0002 },
@@ -99,7 +126,6 @@ static const key_mapping_t key_map[] = {
     { SDL_SCANCODE_Y,         1, 0x0020 },
     { SDL_SCANCODE_U,         1, 0x0040 },
     { SDL_SCANCODE_J,         1, 0x0080 },
-
     /* Column 2 */
     { SDL_SCANCODE_F5,        2, 0x0001 },
     { SDL_SCANCODE_D,         2, 0x0100 },
@@ -108,7 +134,6 @@ static const key_mapping_t key_map[] = {
     { SDL_SCANCODE_F,         2, 0x1000 },
     { SDL_SCANCODE_R,         2, 0x2000 },
     { SDL_SCANCODE_T,         2, 0x4000 },
-
     /* Column 3 */
     { SDL_SCANCODE_F4,        3, 0x0001 },
     { SDL_SCANCODE_Q,         3, 0x0002 },
@@ -118,13 +143,11 @@ static const key_mapping_t key_map[] = {
     { SDL_SCANCODE_S,         3, 0x0020 },
     { SDL_SCANCODE_W,         3, 0x0040 },
     { SDL_SCANCODE_E,         3, 0x0080 },
-
     /* Column 4 */
     { SDL_SCANCODE_F3,        4, 0x0001 },
     { SDL_SCANCODE_RETURN,    4, 0x0008 },
     { SDL_SCANCODE_HOME,      4, 0x0010 },  /* Select */
     { SDL_SCANCODE_SPACE,     4, 0x0040 },
-
     /* Column 5 */
     { SDL_SCANCODE_F2,        5, 0x0001 },
     { SDL_SCANCODE_TAB,       5, 0x0080 },
@@ -132,56 +155,201 @@ static const key_mapping_t key_map[] = {
     { SDL_SCANCODE_DELETE,    5, 0x0100 },
     { SDL_SCANCODE_INSERT,    5, 0x0200 },  /* As */
     { SDL_SCANCODE_ESCAPE,    5, 0x0400 },
-
     /* Column 6 - arrows */
     { SDL_SCANCODE_F1,        6, 0x0001 },
     { SDL_SCANCODE_UP,        6, 0x0800 },
     { SDL_SCANCODE_RIGHT,     6, 0x1000 },
     { SDL_SCANCODE_DOWN,      6, 0x2000 },
     { SDL_SCANCODE_LEFT,      6, 0x4000 },
-
     /* Column 7 - Fn (mapped to Ctrl) */
     { SDL_SCANCODE_LCTRL,     7, 0x8000 },
     { SDL_SCANCODE_RCTRL,     7, 0x8000 },
-
     /* Column 8 - Shift */
     { SDL_SCANCODE_LSHIFT,    8, 0x8000 },
     { SDL_SCANCODE_RSHIFT,    8, 0x8000 },
-
     /* Column 13 */
     { SDL_SCANCODE_END,      13, 0x0001 },  /* Help */
     { SDL_SCANCODE_PERIOD,   13, 0x0002 },
     { SDL_SCANCODE_P,        13, 0x0010 },
-
     /* Column 14 - On/Off */
     { SDL_SCANCODE_F8,       14, 0x8000 },
+};
 
-    /* Number keys mapped to Fn+letter positions for convenience */
-    { SDL_SCANCODE_1,         3, 0x0002 },  /* same as Q */
-    { SDL_SCANCODE_2,         3, 0x0040 },  /* same as W */
-    { SDL_SCANCODE_3,         3, 0x0080 },  /* same as E */
-    { SDL_SCANCODE_4,         2, 0x2000 },  /* same as R */
-    { SDL_SCANCODE_5,         2, 0x4000 },  /* same as T */
-    { SDL_SCANCODE_6,         1, 0x0020 },  /* same as Y */
-    { SDL_SCANCODE_7,         1, 0x0040 },  /* same as U */
-    { SDL_SCANCODE_8,         0, 0x1000 },  /* same as I */
-    { SDL_SCANCODE_9,         0, 0x2000 },  /* same as O */
-    { SDL_SCANCODE_0,        13, 0x0010 },  /* same as P */
+/* Number key -> Fn+letter mapping (col and mask of the letter) */
+static const key_mapping_t num_key_map[] = {
+    { SDL_SCANCODE_1,   3, 0x0002 },  /* Fn+Q */
+    { SDL_SCANCODE_2,   3, 0x0040 },  /* Fn+W */
+    { SDL_SCANCODE_3,   3, 0x0080 },  /* Fn+E */
+    { SDL_SCANCODE_4,   2, 0x2000 },  /* Fn+R */
+    { SDL_SCANCODE_5,   2, 0x4000 },  /* Fn+T */
+    { SDL_SCANCODE_6,   1, 0x0020 },  /* Fn+Y */
+    { SDL_SCANCODE_7,   1, 0x0040 },  /* Fn+U */
+    { SDL_SCANCODE_8,   0, 0x1000 },  /* Fn+I */
+    { SDL_SCANCODE_9,   0, 0x2000 },  /* Fn+O */
+    { SDL_SCANCODE_0,  13, 0x0010 },  /* Fn+P */
 };
 
 static const int KEY_MAP_COUNT = sizeof(key_map) / sizeof(key_map[0]);
+static const int NUM_KEY_MAP_COUNT = sizeof(num_key_map) / sizeof(num_key_map[0]);
+
+/* --- Held key management (minimum hold) --- */
+
+static int find_held(sdl_ctx_t *sdl, int col, uint16_t mask)
+{
+    for (int i = 0; i < sdl->held_count; i++)
+        if (sdl->held_col[i] == col && sdl->held_mask[i] == mask) return i;
+    return -1;
+}
+
+static void remove_held(sdl_ctx_t *sdl, int idx)
+{
+    sdl->held_count--;
+    if (idx < sdl->held_count) {
+        sdl->held_col[idx]    = sdl->held_col[sdl->held_count];
+        sdl->held_mask[idx]   = sdl->held_mask[sdl->held_count];
+        sdl->held_frames[idx] = sdl->held_frames[sdl->held_count];
+        sdl->held_release_pending[idx] = sdl->held_release_pending[sdl->held_count];
+    }
+}
+
+static void press_key_with_hold(sdl_ctx_t *sdl, int col, uint16_t mask, bool pressed)
+{
+    if (pressed) {
+        sdl->key_matrix[col] |= mask;
+        int idx = find_held(sdl, col, mask);
+        if (idx >= 0) {
+            sdl->held_frames[idx] = MIN_HOLD_FRAMES;
+            sdl->held_release_pending[idx] = false;
+        } else if (sdl->held_count < MAX_HELD_KEYS) {
+            int n = sdl->held_count++;
+            sdl->held_col[n]    = col;
+            sdl->held_mask[n]   = mask;
+            sdl->held_frames[n] = MIN_HOLD_FRAMES;
+            sdl->held_release_pending[n] = false;
+        }
+    } else {
+        int idx = find_held(sdl, col, mask);
+        if (idx >= 0 && sdl->held_frames[idx] > 0) {
+            sdl->held_release_pending[idx] = true;
+        } else {
+            sdl->key_matrix[col] &= ~mask;
+            if (idx >= 0) remove_held(sdl, idx);
+        }
+    }
+}
+
+/* --- Fn+letter pending queue (for number keys) --- */
+
+static void queue_pending_letter(sdl_ctx_t *sdl, int col, uint16_t mask, int delay)
+{
+    for (int i = 0; i < sdl->pending_count; i++) {
+        if (sdl->pending_col[i] == col && sdl->pending_mask[i] == mask) {
+            sdl->pending_delay[i] = delay;
+            return;
+        }
+    }
+    if (sdl->pending_count < MAX_PENDING_LETTERS) {
+        int n = sdl->pending_count++;
+        sdl->pending_col[n]   = col;
+        sdl->pending_mask[n]  = mask;
+        sdl->pending_delay[n] = delay;
+    }
+}
+
+static void remove_pending_letter(sdl_ctx_t *sdl, int col, uint16_t mask)
+{
+    for (int i = 0; i < sdl->pending_count; i++) {
+        if (sdl->pending_col[i] == col && sdl->pending_mask[i] == mask) {
+            sdl->pending_count--;
+            if (i < sdl->pending_count) {
+                sdl->pending_col[i]   = sdl->pending_col[sdl->pending_count];
+                sdl->pending_mask[i]  = sdl->pending_mask[sdl->pending_count];
+                sdl->pending_delay[i] = sdl->pending_delay[sdl->pending_count];
+            }
+            return;
+        }
+    }
+}
+
+static void set_fn_letter(sdl_ctx_t *sdl, int col, uint16_t mask, bool pressed)
+{
+    if (pressed) {
+        sdl->fn_held_count++;
+        sdl->fn_release_countdown = 0;
+        if (!sdl->fn_held) {
+            sdl->key_matrix[7] |= 0x8000;  /* Press Fn first */
+            sdl->fn_held = true;
+            queue_pending_letter(sdl, col, mask, FN_FIRST_DELAY);
+        } else {
+            queue_pending_letter(sdl, col, mask, FN_NEXT_DELAY);
+        }
+    } else {
+        sdl->key_matrix[col] &= ~mask;
+        remove_pending_letter(sdl, col, mask);
+        if (sdl->fn_held_count > 0) sdl->fn_held_count--;
+        if (sdl->fn_held_count == 0 && sdl->fn_held) {
+            sdl->fn_release_countdown = FN_RELEASE_DELAY;
+        }
+    }
+}
+
+/* --- Per-frame keyboard tick (call before cybiko_run_frame) --- */
+
+static void keyboard_tick_frame(sdl_ctx_t *sdl)
+{
+    /* Process minimum hold timers */
+    for (int i = 0; i < sdl->held_count; i++) {
+        if (sdl->held_frames[i] > 0) sdl->held_frames[i]--;
+        if (sdl->held_frames[i] <= 0 && sdl->held_release_pending[i]) {
+            sdl->key_matrix[sdl->held_col[i]] &= ~sdl->held_mask[i];
+            remove_held(sdl, i);
+            i--;
+        }
+    }
+
+    /* Process pending Fn+letter presses */
+    for (int i = 0; i < sdl->pending_count; i++) {
+        if (--sdl->pending_delay[i] <= 0) {
+            sdl->key_matrix[sdl->pending_col[i]] |= sdl->pending_mask[i];
+            sdl->pending_count--;
+            if (i < sdl->pending_count) {
+                sdl->pending_col[i]   = sdl->pending_col[sdl->pending_count];
+                sdl->pending_mask[i]  = sdl->pending_mask[sdl->pending_count];
+                sdl->pending_delay[i] = sdl->pending_delay[sdl->pending_count];
+            }
+            i--;
+        }
+    }
+
+    /* Delayed Fn release */
+    if (sdl->fn_release_countdown > 0) {
+        sdl->fn_release_countdown--;
+        if (sdl->fn_release_countdown == 0 && sdl->fn_held) {
+            sdl->key_matrix[7] &= ~0x8000;
+            sdl->fn_held = false;
+        }
+    }
+}
+
+/* --- Main key event handler --- */
 
 static void update_key_matrix(sdl_ctx_t *sdl, SDL_KeyboardEvent *key)
 {
     bool pressed = (key->type == SDL_KEYDOWN);
     SDL_Scancode sc = key->keysym.scancode;
 
+    /* Check number keys first (need Fn+letter handling) */
+    for (int i = 0; i < NUM_KEY_MAP_COUNT; i++) {
+        if (num_key_map[i].scancode == sc) {
+            set_fn_letter(sdl, num_key_map[i].col, num_key_map[i].mask, pressed);
+            return;
+        }
+    }
+
+    /* Regular keys with minimum hold */
     for (int i = 0; i < KEY_MAP_COUNT; i++) {
         if (key_map[i].scancode == sc) {
-            if (pressed)
-                sdl->key_matrix[key_map[i].col] |= key_map[i].mask;
-            else
-                sdl->key_matrix[key_map[i].col] &= ~key_map[i].mask;
+            press_key_with_hold(sdl, key_map[i].col, key_map[i].mask, pressed);
             return;
         }
     }
@@ -444,6 +612,7 @@ int main(int argc, char *argv[])
             }
         }
 
+        keyboard_tick_frame(&sdl_ctx);
         cybiko_run_frame(emu);
 
         /* Frame-rate limiting (~60 FPS) */
