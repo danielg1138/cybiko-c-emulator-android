@@ -25,6 +25,17 @@ cmake -B build
 cmake --build build
 ```
 
+## ROMs
+
+This emulator requires Cybiko XT firmware files that are not included in this repository:
+
+- **boot.bin** - Boot ROM (`cyrom150.bin`)
+- **flash.bin** - CyOS firmware (`cyos_v1508.bin`, firmware v1.5.08)
+
+Cybiko firmware and `.app` files can be found on the [Cybiko Archive at archive.org](https://archive.org/details/cybiko).
+
+Place ROMs in the `roms/` directory or specify paths directly.
+
 ## Running
 
 ```bash
@@ -101,6 +112,10 @@ ctest --test-dir build --output-on-failure
 ```
 
 Runs unit tests for all core modules: memory, CFS, keyboard, timer8, timer16, speaker, HD66421 LCD, and H8S CPU.
+
+## Acknowledgments
+
+This emulator was developed using [MAME](https://github.com/mamedev/mame) (GPL-2.0) as a reference for hardware behavior, including timer clock divisor tables, LCD rendering order, and CFS CRC16 computation. It was also ported from a Java implementation that itself referenced MAME.
 
 ## Links
 
