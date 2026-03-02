@@ -106,4 +106,4 @@ Runs unit tests for all core modules: memory, CFS, keyboard, timer8, timer16, sp
 
 - [Cybiko Archive (archive.org)](https://archive.org/details/cybiko)
 - [MAME Cybiko XT source](https://github.com/mamedev/mame/blob/master/src/mame/cybiko/cybiko.cpp)
-- [Web emulator](https://cybiko.kyul.is/)
+- [Web emulator](https://www.schuerewegen.tk/cybiko/emu/)

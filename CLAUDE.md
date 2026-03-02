@@ -10,7 +10,6 @@ Cybiko XT emulator ported from Java to C, targeting Linux (SDL2) and ESP32-S3 (T
 
 ## Reference Implementations
 
-- **Web emulator** (`../website clones/cybiko_xtreme/`): Newer, confirmed working. **Use as primary reference** for keyboard mappings and behavior.
 - **Java emulator** (`../cybiko-java-emulator/`): Original port source. Has known keyboard column bug (P on column 13).
 - **MAME** (`../mame/`): Older, incomplete XT support. Keyboard column definitions for XT are wrong (P on column 13 instead of column 9).
 
