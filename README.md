@@ -1,6 +1,8 @@
 # Cybiko Xtreme Emulator
 
-A Cybiko Xtreme (XT) handheld computer emulator written in C, ported from a Java implementation. Boots and runs CyOS with full CPU, display, audio, keyboard, and filesystem emulation.
+A Cybiko Xtreme (XT) handheld computer emulator written in C, ported from my [Java implementation](https://github.com/daberkow/cybiko-java-emulator). Boots and runs CyOS with full CPU, display, audio, keyboard, and filesystem emulation.
+
+I wanted to try to port the emulator to get it running on embedded devices.
 
 ## Features
 
