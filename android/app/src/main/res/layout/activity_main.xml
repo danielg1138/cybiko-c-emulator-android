@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#121410">
+
+    <!-- Top Screen: Scaled 160x100 Cybiko LCD -->
+    <com.cybiko.emulator.CybikoDisplayView
+        android:id="@+id/displayView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- Bottom Screen: Full Authentic Cybiko Keyboard -->
+    <com.cybiko.emulator.CybikoKeyboardView
+        android:id="@+id/keyboardView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+</LinearLayout>

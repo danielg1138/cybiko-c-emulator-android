@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Cybiko" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#121410</item>
+        <item name="android:statusBarColor">#121410</item>
+        <item name="android:navigationBarColor">#121410</item>
+    </style>
+</resources>

@@ -1,7 +1,31 @@
 build/
-roms/*.bin
-roms/*.nvram
+*.bin
+*.rom
+*.nvram
+*.zip
+*.app
 *.o
 *.d
 .cache/
 compile_commands.json
+.DS_Store
+
+# Android build outputs & local config
+.cxx/
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+android/.idea/
+android/app/src/main/assets/roms/
+*.apk
+*.aab
+
+# Local firmware & assets root folders
+/cybiko/
+/MAME files/
+
+
+
+
