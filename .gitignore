@@ -19,12 +19,18 @@ android/app/.cxx/
 android/local.properties
 android/.idea/
 android/app/src/main/assets/roms/
+android/app/src/main/assets/apps/
 *.apk
 *.aab
 
 # Local firmware & assets root folders
 /cybiko/
 /MAME files/
+
+# Test executables
+tests/test_*
+!tests/test_*.c
+!tests/test_*.h
 
 
 

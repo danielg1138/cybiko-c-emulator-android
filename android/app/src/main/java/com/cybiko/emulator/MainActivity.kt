@@ -55,12 +55,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupDualDisplayIfAvailable() {
         val dm = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-        val displays = dm.displays
+        val presentationDisplays = dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+        val secondaryDisplay: Display? = if (presentationDisplays.isNotEmpty()) {
+            presentationDisplays[0]
+        } else {
+            val all = dm.displays
+            all.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY }
+        }
 
-        if (displays.size > 1) {
+        if (secondaryDisplay != null) {
             /* Secondary display found (Thor bottom screen) */
-            val secondaryDisplay: Display = displays[1]
-            Log.i(TAG, "Secondary display detected: ${secondaryDisplay.name} (${secondaryDisplay.width}x${secondaryDisplay.height})")
+            Log.i(TAG, "Secondary presentation display detected: ${secondaryDisplay.name} (id=${secondaryDisplay.displayId}, ${secondaryDisplay.width}x${secondaryDisplay.height})")
 
             /* Hide on-screen keyboard from top display, expand display view */
             keyboardView.visibility = View.GONE
@@ -69,10 +74,34 @@ class MainActivity : AppCompatActivity() {
             keyboardPresentation = object : Presentation(this, secondaryDisplay) {
                 override fun onCreate(savedInstanceState: Bundle?) {
                     super.onCreate(savedInstanceState)
+                    window?.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                    window?.decorView?.systemUiVisibility = (
+                        View.SYSTEM_UI_FLAG_FULLSCREEN
+                            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    )
                     setContentView(CybikoKeyboardView(context))
                 }
+
+                override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                    val cyKey = ThorGamepadMapper.mapKeyEvent(event.keyCode)
+                    if (cyKey != 0) {
+                        if (event.repeatCount == 0) {
+                            val pressed = (event.action == KeyEvent.ACTION_DOWN)
+                            CybikoNative.nativeSendKey(cyKey, pressed)
+                        }
+                        return true
+                    }
+                    return super.dispatchKeyEvent(event)
+                }
             }
-            keyboardPresentation?.show()
+            try {
+                keyboardPresentation?.show()
+                Log.i(TAG, "Keyboard Presentation successfully shown on secondary display")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to show Presentation on secondary display", e)
+                keyboardView.visibility = View.VISIBLE
+            }
         } else {
             Log.i(TAG, "Single display layout active (split top/bottom)")
         }
@@ -114,6 +143,24 @@ class MainActivity : AppCompatActivity() {
         if (bootBytes != null && flashBytes != null) {
             CybikoNative.nativeLoadRoms(bootBytes, flashBytes, nvramBytes)
             Log.i(TAG, "Firmware successfully loaded from ${romDir.absolutePath}")
+
+            /* Auto-inject bundled apps from assets/apps/ if nvram didn't exist */
+            if (nvramBytes == null) {
+                try {
+                    val appFiles = assets.list("apps") ?: emptyArray()
+                    for (appName in appFiles) {
+                        if (appName.endsWith(".app", ignoreCase = true)) {
+                            assets.open("apps/$appName").use { input ->
+                                val appData = input.readBytes()
+                                val injected = CybikoNative.nativeInjectApp(appName, appData)
+                                Log.i(TAG, "Auto-injected app '$appName' (success=$injected)")
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to load bundled apps from assets", e)
+                }
+            }
         } else {
             Log.w(TAG, "Firmware files not found in ${romDir.absolutePath}. Place boot.bin & flash.bin there.")
         }

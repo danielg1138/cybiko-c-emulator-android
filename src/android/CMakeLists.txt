@@ -29,6 +29,8 @@ add_library(cybiko SHARED
     ${ANDROID_SOURCES}
 )
 
+target_compile_options(cybiko PRIVATE -O3 -fomit-frame-pointer)
+
 target_include_directories(cybiko PRIVATE
     ..
     ../core

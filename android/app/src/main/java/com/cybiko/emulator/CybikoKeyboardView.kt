@@ -193,17 +193,21 @@ class CybikoKeyboardView @JvmOverloads constructor(
                 val y = event.getY(actionIndex)
                 val touchedKey = findKeyAt(x, y)
                 if (touchedKey != null) {
+                    android.util.Log.d("CybikoKeyboard", "Key DOWN: ${touchedKey.label} (id=${touchedKey.id}) at ($x, $y)")
                     activeTouches[pointerId] = touchedKey
                     touchedKey.isPressed = true
                     performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     CybikoNative.nativeSendKey(touchedKey.id, true)
                     invalidate()
+                } else {
+                    android.util.Log.d("CybikoKeyboard", "Touch missed keys at ($x, $y)")
                 }
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
                 val releasedKey = activeTouches.remove(pointerId)
                 if (releasedKey != null) {
+                    android.util.Log.d("CybikoKeyboard", "Key UP: ${releasedKey.label} (id=${releasedKey.id})")
                     releasedKey.isPressed = false
                     CybikoNative.nativeSendKey(releasedKey.id, false)
                     invalidate()

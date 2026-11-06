@@ -33,6 +33,7 @@ typedef struct {
     cybiko_audio_t       *audio;
     cybiko_input_state_t  input;
     pthread_mutex_t       render_mutex;
+    pthread_mutex_t       input_mutex;
 
     /* Double-buffered 160x100 RGBA frame buffer */
     uint32_t              frame_rgba[CYBIKO_LCD_WIDTH * CYBIKO_LCD_HEIGHT];
@@ -82,7 +83,9 @@ static void hal_audio_output(void *ctx, const uint8_t *samples, int count)
 static void hal_keyboard_poll(void *ctx, uint16_t *matrix, int num_cols)
 {
     android_ctx_t *actx = (android_ctx_t *)ctx;
+    pthread_mutex_lock(&actx->input_mutex);
     cybiko_input_copy_matrix(&actx->input, matrix, num_cols);
+    pthread_mutex_unlock(&actx->input_mutex);
 }
 
 static void hal_serial_output(void *ctx, uint8_t byte)
@@ -115,6 +118,7 @@ Java_com_cybiko_emulator_CybikoNative_nativeInit(JNIEnv *env, jclass clazz, jint
 
     memset(&g_ctx, 0, sizeof(g_ctx));
     pthread_mutex_init(&g_ctx.render_mutex, NULL);
+    pthread_mutex_init(&g_ctx.input_mutex, NULL);
     g_ctx.palette_mode = (palette_mode >= 0 && palette_mode <= 2) ? palette_mode : 0;
 
     cybiko_input_init(&g_ctx.input);
@@ -160,6 +164,7 @@ Java_com_cybiko_emulator_CybikoNative_nativeDestroy(JNIEnv *env, jclass clazz)
         g_ctx.audio = NULL;
     }
     pthread_mutex_destroy(&g_ctx.render_mutex);
+    pthread_mutex_destroy(&g_ctx.input_mutex);
     g_initialized = false;
     LOGI("CybikoNative destroyed");
 }
@@ -200,13 +205,32 @@ Java_com_cybiko_emulator_CybikoNative_nativeLoadRoms(
         LOGI("Loaded flash ROM (%d bytes)", (int)flash_len);
     }
 
-    /* 3. NVRAM */
+    /* 3. NVRAM / CFS Filesystem */
     if (nvram_array) {
         jsize nvram_len = (*env)->GetArrayLength(env, nvram_array);
-        jbyte *nvram_ptr = (*env)->GetByteArrayElements(env, nvram_array, NULL);
-        cybiko_load_nvram(g_ctx.emu, (const uint8_t *)nvram_ptr, (size_t)nvram_len);
-        (*env)->ReleaseByteArrayElements(env, nvram_array, nvram_ptr, JNI_ABORT);
-        LOGI("Loaded NVRAM (%d bytes)", (int)nvram_len);
+        if (nvram_len >= CFS_IMAGE_SIZE) {
+            jbyte *nvram_ptr = (*env)->GetByteArrayElements(env, nvram_array, NULL);
+            cybiko_load_nvram(g_ctx.emu, (const uint8_t *)nvram_ptr, (size_t)nvram_len);
+            (*env)->ReleaseByteArrayElements(env, nvram_array, nvram_ptr, JNI_ABORT);
+            LOGI("Loaded NVRAM (%d bytes)", (int)nvram_len);
+        } else {
+            cfs_image_t *cfs = malloc(sizeof(cfs_image_t));
+            if (cfs) {
+                cfs_format(cfs);
+                cybiko_load_nvram(g_ctx.emu, cfs->data, CFS_IMAGE_SIZE);
+                free(cfs);
+                LOGI("NVRAM too small (%d bytes); formatted fresh CFS (%d bytes)", (int)nvram_len, CFS_IMAGE_SIZE);
+            }
+        }
+    } else {
+        /* Format a fresh CFS filesystem so CyOS has a valid file system to mount */
+        cfs_image_t *cfs = malloc(sizeof(cfs_image_t));
+        if (cfs) {
+            cfs_format(cfs);
+            cybiko_load_nvram(g_ctx.emu, cfs->data, CFS_IMAGE_SIZE);
+            free(cfs);
+            LOGI("No NVRAM provided; formatted fresh CFS filesystem (%d bytes)", CFS_IMAGE_SIZE);
+        }
     }
 
     cybiko_reset(g_ctx.emu);
@@ -277,7 +301,10 @@ Java_com_cybiko_emulator_CybikoNative_nativeRunFrame(JNIEnv *env, jclass clazz)
     clock_gettime(CLOCK_MONOTONIC, &t0);
 
     /* Update input hold timers before frame cycle */
+    pthread_mutex_lock(&g_ctx.input_mutex);
     cybiko_input_tick_frame(&g_ctx.input);
+    pthread_mutex_unlock(&g_ctx.input_mutex);
+
     cybiko_run_frame(g_ctx.emu);
 
     clock_gettime(CLOCK_MONOTONIC, &t1);
@@ -313,7 +340,10 @@ Java_com_cybiko_emulator_CybikoNative_nativeSendKey(
     (void)env;
     (void)clazz;
     if (!g_initialized) return;
+    LOGD("nativeSendKey(key=%d, pressed=%d)", (int)key_id, (int)pressed);
+    pthread_mutex_lock(&g_ctx.input_mutex);
     cybiko_input_set_key(&g_ctx.input, (int)key_id, (bool)pressed);
+    pthread_mutex_unlock(&g_ctx.input_mutex);
 }
 
 JNIEXPORT void JNICALL
@@ -323,7 +353,9 @@ Java_com_cybiko_emulator_CybikoNative_nativeSendRawKey(
     (void)env;
     (void)clazz;
     if (!g_initialized) return;
+    pthread_mutex_lock(&g_ctx.input_mutex);
     cybiko_input_set_raw_cell(&g_ctx.input, (int)col, (uint16_t)mask, (bool)pressed);
+    pthread_mutex_unlock(&g_ctx.input_mutex);
 }
 
 JNIEXPORT jbyteArray JNICALL

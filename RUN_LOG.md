@@ -12,6 +12,7 @@
 | **006** | Host Clang Unit Test | Android Bridge Native Logic (`test_android_bridge.c`) | 4/4 verification suites pass | Debounce, Fn-timing, PCM conversion, column bounds | **PASS** (Android bridge validated) |
 | **007** | Cybiko XT MAME ROMs | Automated Boot Smoke Test (`test_xt_boot.c`) | 312.72 FPS (3.20 ms/frame) | Bootloader -> DRAM 2048K -> LZSS decomp -> CyOS 0x4a3bf8 | **PASS** (5.2x real-time speed) |
 | **008** | Gradle / AGP | APK Assembly with Bundled Assets | `app-debug.apk` (7.8 MB) | Auto-extracts `boot.bin` & `flash.bin` on first launch | **PASS** (Zero-setup APK ready) |
+| **009** | Ayn Thor (`3767dd3c`) | Hardware Boot, Dual-Screen, CFS & -O3 Optimization | 3.80 ms - 4.20 ms (59.5-60.4 FPS) | Top screen 10x integer scale, bottom screen Presentation keyboard, physical Button A maps to Enter, CFS 512 KB formatted | **PASS** (Hardware 60 FPS validated) |
 
 ---
 
@@ -81,6 +82,19 @@
 - **Measurement:** Added asset extraction logic to `MainActivity.kt`, bundled `boot.bin` and `flash.bin` into `android/app/src/main/assets/roms/`, and assembled debug APK.
 - **Result:** Built `app-debug.apk` (7.8 MB). `unzip -l` confirms `assets/roms/boot.bin`, `assets/roms/flash.bin`, and `lib/arm64-v8a/libcybiko.so` are present inside APK.
 - **Verdict:** PASS. Zero-setup installation confirmed.
+
+### Run 009: Ayn Thor Physical Hardware Deployment, Dual-Screen & -O3 Optimization
+- **Hypothesis:** Compiling with `-O3 -fomit-frame-pointer` will bring core frame times under the 16.6 ms budget on the Ayn Thor Snapdragon chipset, while CFS auto-formatting and Presentation window key dispatch will allow full dual-screen interaction with CyOS.
+- **Measurement:** Deployed to Ayn Thor (`3767dd3c`), tested dual-screen rendering (Top 1080p display ID 0, Bottom Presentation display ID 4), recorded logcat telemetry for frame timing and input matrix synchronization.
+- **Result:**
+  - Frame time dropped from **28.35 ms** (`-O0`) to **3.80 ms - 4.20 ms** (`-O3`), locking solid **59.5–60.4 FPS** (~24% frame budget utilization).
+  - Presentation window successfully initialized on Display 4 with sticky immersive mode and haptic QWERTY keyboard.
+  - Presentation window key dispatch overrode physical gamepad button events (`ThorGamepadMapper`), routing Button A (`KEYCODE_BUTTON_A`) to Cybiko Enter (`CYBIKO_KEY_ENTER`).
+  - Added `pthread_mutex_t input_mutex` in `cybiko_jni.c` to prevent race conditions between UI touch events and the 60 FPS emulation thread.
+  - Increased `CYBIKO_MIN_HOLD_FRAMES` to 6 frames (~100 ms hold) so CyOS keyboard scanning reliably detects fast touch and button taps.
+  - Added auto-format `cfs_format()` (524,544 bytes) when uninitialized NVRAM is detected, allowing CyOS to mount its filesystem and advance past the setup wizard.
+  - User successfully advanced CyOS through the First-Boot Setup Wizard (Welcome -> Contrast -> Time/Date -> Nickname screen).
+- **Verdict:** PASS. Verified end-to-end on Ayn Thor physical hardware.
 
 
 
