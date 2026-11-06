@@ -5,6 +5,7 @@ import android.content.Context
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.Display
@@ -33,6 +34,10 @@ class MainActivity : AppCompatActivity() {
     private var emuThread: Thread? = null
     private val isRunning = AtomicBoolean(false)
     private var currentPalette = CybikoNative.PALETTE_CYBIKO_GREEN
+
+    private var currentBrowserDir = File("/sdcard/Download/Cybiko_Games").let {
+        if (it.exists()) it else Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+    }
 
     private val openAppLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -68,16 +73,30 @@ class MainActivity : AppCompatActivity() {
         /* Initialize Native Core */
         CybikoNative.nativeInit(currentPalette)
 
-        /* Check for secondary display (Ayn Thor Clamshell Bottom Screen) */
-        setupDualDisplayIfAvailable()
-
         /* Load ROMs and persistent NVRAM */
         loadFirmwareAndNvram()
     }
 
+    override fun onStart() {
+        super.onStart()
+        /* Attach presentation to secondary clamshell display whenever activity becomes visible */
+        setupDualDisplayIfAvailable()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        /* Dismiss secondary display presentation so both screens disappear together when going Home */
+        try {
+            keyboardPresentation?.dismiss()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error dismissing presentation onStop", e)
+        }
+        keyboardPresentation = null
+    }
+
     private fun setupSingleScreenToolbar() {
         findViewById<Button>(R.id.btnMainLoadApp).setOnClickListener {
-            openAppLauncher.launch(arrayOf("*/*"))
+            showAppBrowserDialog()
         }
         findViewById<Button>(R.id.btnMainSaveNvram).setOnClickListener {
             saveNvram()
@@ -108,83 +127,152 @@ class MainActivity : AppCompatActivity() {
             /* Hide bottom container from top display, leaving top screen purely for LCD */
             bottomContainer.visibility = View.GONE
 
-            /* Launch Presentation on secondary display */
-            keyboardPresentation = object : Presentation(this, secondaryDisplay) {
-                override fun onCreate(savedInstanceState: Bundle?) {
-                    super.onCreate(savedInstanceState)
-                    setCancelable(false)
-                    setCanceledOnTouchOutside(false)
+            if (keyboardPresentation == null || !keyboardPresentation!!.isShowing) {
+                keyboardPresentation = object : Presentation(this, secondaryDisplay) {
+                    override fun onCreate(savedInstanceState: Bundle?) {
+                        super.onCreate(savedInstanceState)
+                        setCancelable(false)
+                        setCanceledOnTouchOutside(false)
 
-                    window?.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-                    window?.decorView?.systemUiVisibility = (
-                        View.SYSTEM_UI_FLAG_FULLSCREEN
-                            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    )
+                        window?.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                        window?.decorView?.systemUiVisibility = (
+                            View.SYSTEM_UI_FLAG_FULLSCREEN
+                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        )
 
-                    val presentationView = layoutInflater.inflate(R.layout.presentation_bottom, null)
-                    setContentView(presentationView)
+                        val presentationView = layoutInflater.inflate(R.layout.presentation_bottom, null)
+                        setContentView(presentationView)
 
-                    presentationView.findViewById<Button>(R.id.btnLoadApp).setOnClickListener {
-                        Log.i(TAG, "User tapped '+ LOAD .APP' button")
-                        openAppLauncher.launch(arrayOf("*/*"))
-                    }
-                    presentationView.findViewById<Button>(R.id.btnSaveNvram).setOnClickListener {
-                        Log.i(TAG, "User tapped 'SAVE' button")
-                        saveNvram()
-                        Toast.makeText(this@MainActivity, "NVRAM saved", Toast.LENGTH_SHORT).show()
-                    }
-                    presentationView.findViewById<Button>(R.id.btnPalette).setOnClickListener {
-                        Log.i(TAG, "User tapped 'PALETTE' button")
-                        cyclePalette()
-                    }
-                    presentationView.findViewById<Button>(R.id.btnReset).setOnClickListener {
-                        Log.i(TAG, "User tapped 'RESET' button")
-                        showResetDialog()
-                    }
-                }
-
-                override fun onBackPressed() {
-                    /* Forward to Cybiko ESC key instead of dismissing presentation */
-                    CybikoNative.nativeSendKey(CybikoNative.KEY_ESC, true)
-                }
-
-                override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                    if (event.keyCode == KeyEvent.KEYCODE_BACK) {
-                        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                            CybikoNative.nativeSendKey(CybikoNative.KEY_ESC, true)
+                        presentationView.findViewById<Button>(R.id.btnLoadApp).setOnClickListener {
+                            Log.i(TAG, "User tapped '+ LOAD .APP' button")
+                            showAppBrowserDialog()
                         }
-                        return true
-                    }
-                    val cyKey = ThorGamepadMapper.mapKeyEvent(event.keyCode)
-                    if (cyKey != 0) {
-                        if (event.repeatCount == 0) {
-                            val pressed = (event.action == KeyEvent.ACTION_DOWN)
-                            CybikoNative.nativeSendKey(cyKey, pressed)
+                        presentationView.findViewById<Button>(R.id.btnSaveNvram).setOnClickListener {
+                            Log.i(TAG, "User tapped 'SAVE' button")
+                            saveNvram()
+                            Toast.makeText(this@MainActivity, "NVRAM saved", Toast.LENGTH_SHORT).show()
                         }
-                        return true
+                        presentationView.findViewById<Button>(R.id.btnPalette).setOnClickListener {
+                            Log.i(TAG, "User tapped 'PALETTE' button")
+                            cyclePalette()
+                        }
+                        presentationView.findViewById<Button>(R.id.btnReset).setOnClickListener {
+                            Log.i(TAG, "User tapped 'RESET' button")
+                            showResetDialog()
+                        }
                     }
-                    return super.dispatchKeyEvent(event)
-                }
-            }
 
-            keyboardPresentation?.setOnDismissListener {
-                Log.w(TAG, "Presentation dismissed; re-showing on secondary display")
-                if (!isFinishing && !isDestroyed) {
-                    setupDualDisplayIfAvailable()
-                }
-            }
+                    override fun onBackPressed() {
+                        /* Forward to Cybiko ESC key instead of dismissing presentation */
+                        CybikoNative.nativeSendKey(CybikoNative.KEY_ESC, true)
+                    }
 
-            try {
-                keyboardPresentation?.show()
-                Log.i(TAG, "Keyboard Presentation successfully shown on secondary display")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to show Presentation on secondary display", e)
-                bottomContainer.visibility = View.VISIBLE
+                    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                                CybikoNative.nativeSendKey(CybikoNative.KEY_ESC, true)
+                            }
+                            return true
+                        }
+                        val cyKey = ThorGamepadMapper.mapKeyEvent(event.keyCode)
+                        if (cyKey != 0) {
+                            if (event.repeatCount == 0) {
+                                val pressed = (event.action == KeyEvent.ACTION_DOWN)
+                                CybikoNative.nativeSendKey(cyKey, pressed)
+                            }
+                            return true
+                        }
+                        return super.dispatchKeyEvent(event)
+                    }
+                }
+
+                try {
+                    keyboardPresentation?.show()
+                    Log.i(TAG, "Keyboard Presentation successfully shown on secondary display")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to show Presentation on secondary display", e)
+                    bottomContainer.visibility = View.VISIBLE
+                }
             }
         } else {
             Log.i(TAG, "Single display layout active (split top/bottom)")
             bottomContainer.visibility = View.VISIBLE
+        }
+    }
+
+    private fun showAppBrowserDialog() {
+        if (!currentBrowserDir.exists()) {
+            currentBrowserDir = Environment.getExternalStorageDirectory()
+        }
+
+        val files = currentBrowserDir.listFiles() ?: emptyArray()
+        val appFiles = files.filter { !it.isDirectory && (it.name.endsWith(".app", true) || it.name.endsWith(".fls", true)) }
+            .sortedBy { it.name.lowercase() }
+        val subDirs = files.filter { it.isDirectory && !it.name.startsWith(".") }
+            .sortedBy { it.name.lowercase() }
+
+        val items = mutableListOf<String>()
+        val fileTargets = mutableListOf<File?>()
+
+        /* Up navigation */
+        val parent = currentBrowserDir.parentFile
+        if (parent != null && currentBrowserDir.absolutePath != Environment.getExternalStorageDirectory().absolutePath && currentBrowserDir.absolutePath != "/") {
+            items.add("📁 .. (Up one level)")
+            fileTargets.add(parent)
+        }
+
+        /* Subdirectories */
+        for (dir in subDirs) {
+            items.add("📁 ${dir.name}/")
+            fileTargets.add(dir)
+        }
+
+        /* Cybiko Application Files */
+        for (app in appFiles) {
+            val sizeKb = (app.length() + 1023) / 1024
+            items.add("🎮 ${app.name} (${sizeKb} KB)")
+            fileTargets.add(app)
+        }
+
+        if (items.isEmpty()) {
+            items.add("(No .app files or folders found here)")
+            fileTargets.add(null)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Select Cybiko App: ${currentBrowserDir.name}")
+            .setItems(items.toTypedArray()) { _, which ->
+                val target = fileTargets[which] ?: return@setItems
+                if (target.isDirectory) {
+                    currentBrowserDir = target
+                    showAppBrowserDialog()
+                } else {
+                    installAppFromFile(target)
+                }
+            }
+            .setNeutralButton("System File Picker") { _, _ ->
+                openAppLauncher.launch(arrayOf("*/*"))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun installAppFromFile(file: File) {
+        try {
+            val appBytes = file.readBytes()
+            val success = CybikoNative.nativeInjectApp(file.name, appBytes)
+            if (success) {
+                saveNvram()
+                Toast.makeText(this, "Installed '${file.name}' to Cybiko!", Toast.LENGTH_SHORT).show()
+                Log.i(TAG, "Successfully installed app '${file.name}' from file (${appBytes.size} bytes)")
+            } else {
+                Toast.makeText(this, "Failed to install '${file.name}' (CFS filesystem full?)", Toast.LENGTH_LONG).show()
+                Log.w(TAG, "CFS rejected app '${file.name}'")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error installing app from file $file", e)
+            Toast.makeText(this, "Error installing app: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -356,7 +444,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        keyboardPresentation?.dismiss()
+        try {
+            keyboardPresentation?.dismiss()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error dismissing presentation onDestroy", e)
+        }
+        keyboardPresentation = null
         CybikoNative.nativeDestroy()
     }
 

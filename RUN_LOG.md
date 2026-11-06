@@ -14,6 +14,7 @@
 | **008** | Gradle / AGP | APK Assembly with Bundled Assets | `app-debug.apk` (7.8 MB) | Auto-extracts `boot.bin` & `flash.bin` on first launch | **PASS** (Zero-setup APK ready) |
 | **009** | Ayn Thor (`3767dd3c`) | Hardware Boot, Dual-Screen, CFS & -O3 Optimization | 3.80 ms - 4.20 ms (59.5-60.4 FPS) | Top screen 10x integer scale, bottom screen Presentation keyboard, physical Button A maps to Enter, CFS 512 KB formatted | **PASS** (Hardware 60 FPS validated) |
 | **010** | Ayn Thor (`3767dd3c`) | Clamshell Toolbar, Back-to-ESC Mapping, SAF Loader | 4.16 ms - 4.47 ms (58.4-60.5 FPS) | Back key maps to Cybiko ESC (no dialog dismiss), bottom toolbar (+LOAD .APP, SAVE, PALETTE, RESET), 30s auto-save verified | **PASS** (App loading & toolbar operational) |
+| **011** | Ayn Thor (`3767dd3c`) | Dual-Screen Lifecycle Sync & In-App App Browser | 4.14 ms - 4.30 ms (58.9-60.0 FPS) | Synchronized onStart/onStop presentation dismiss on Home (melonDS/Azahar pattern); in-app file browser lists .app files directly | **PASS** (Screen sync & file browser verified) |
 
 ---
 
@@ -107,6 +108,16 @@
   - Pushed curated test library (`pinball_pro.app`, `Homerun_X.app`, `tetris.app`, `Snake.app`, `BTower_X.app`) to `/sdcard/Download/Cybiko_Games/` for testing with SAF file picker.
   - Core frame time: **4.16 ms - 4.47 ms** (**58.4 - 60.5 FPS**).
 - **Verdict:** PASS. Clamshell toolbar and game loader verified operational.
+
+### Run 011: Synchronized Dual-Screen Lifecycle & In-App App Browser
+- **Hypothesis:** Tying `keyboardPresentation` lifecycle explicitly to `onStart()` (attach) and `onStop()` (dismiss) will mirror melonDS/Azahar behavior, ensuring both clamshell screens dismiss and reappear together when entering Home or multitasking; implementing an in-app file browser dialog will bypass Android DocumentsUI's MIME-type filtering issue for unknown `.app` extensions.
+- **Measurement:** Sent `KEYCODE_HOME` on Ayn Thor (`3767dd3c`), confirmed both top and bottom screens exited to launcher via `screencap`, reopened Cybiko from launcher and verified both screens re-attached cleanly. Tapped `+ LOAD .APP`, verified in-app file browser displayed `.app` files with sizes, selected `pinball_pro.app`, and confirmed CFS injection in logcat.
+- **Result:**
+  - `KEYCODE_HOME` immediately dismissed `keyboardPresentation` in `onStop()`; screencap confirmed secondary display returned to Android launcher wallpaper.
+  - Re-launching app from launcher triggered `onStart()` which cleanly re-attached `keyboardPresentation` on Display 4.
+  - In-app app browser dialog opened, listing files in `/sdcard/Download/Cybiko_Games` (`BTower_X.app`, `Homerun_X.app`, `pinball_pro.app`, `Snake.app`, `tetris.app`).
+  - Selecting `pinball_pro.app` injected 19,121 bytes directly into CFS and persisted 2,097,152 bytes NVRAM.
+- **Verdict:** PASS. Dual-screen lifecycle synchronization and in-app file picker validated on hardware.
 
 
 
