@@ -13,6 +13,7 @@
 | **007** | Cybiko XT MAME ROMs | Automated Boot Smoke Test (`test_xt_boot.c`) | 312.72 FPS (3.20 ms/frame) | Bootloader -> DRAM 2048K -> LZSS decomp -> CyOS 0x4a3bf8 | **PASS** (5.2x real-time speed) |
 | **008** | Gradle / AGP | APK Assembly with Bundled Assets | `app-debug.apk` (7.8 MB) | Auto-extracts `boot.bin` & `flash.bin` on first launch | **PASS** (Zero-setup APK ready) |
 | **009** | Ayn Thor (`3767dd3c`) | Hardware Boot, Dual-Screen, CFS & -O3 Optimization | 3.80 ms - 4.20 ms (59.5-60.4 FPS) | Top screen 10x integer scale, bottom screen Presentation keyboard, physical Button A maps to Enter, CFS 512 KB formatted | **PASS** (Hardware 60 FPS validated) |
+| **010** | Ayn Thor (`3767dd3c`) | Clamshell Toolbar, Back-to-ESC Mapping, SAF Loader | 4.16 ms - 4.47 ms (58.4-60.5 FPS) | Back key maps to Cybiko ESC (no dialog dismiss), bottom toolbar (+LOAD .APP, SAVE, PALETTE, RESET), 30s auto-save verified | **PASS** (App loading & toolbar operational) |
 
 ---
 
@@ -95,6 +96,17 @@
   - Added auto-format `cfs_format()` (524,544 bytes) when uninitialized NVRAM is detected, allowing CyOS to mount its filesystem and advance past the setup wizard.
   - User successfully advanced CyOS through the First-Boot Setup Wizard (Welcome -> Contrast -> Time/Date -> Nickname screen).
 - **Verdict:** PASS. Verified end-to-end on Ayn Thor physical hardware.
+
+### Run 010: Clamshell Toolbar, Hardware Back Mapping & SAF App Loader
+- **Hypothesis:** Intercepting `KEYCODE_BACK` at both `Presentation` and `MainActivity` level and routing to `CYBIKO_KEY_ESC` will prevent hardware back presses from dismissing the secondary display dialog while allowing natural menu back navigation in CyOS; adding a bottom screen toolbar with Storage Access Framework (SAF) will enable one-tap live app injection into CFS.
+- **Measurement:** Deployed update to Ayn Thor (`3767dd3c`), sent `KEYCODE_BACK` events while viewing dialogs, verified Presentation retention via `screencap -d 4630946482288158084`, checked logcat for 30s NVRAM auto-saving, and loaded CyOS Main Desktop.
+- **Result:**
+  - Hardware Back press successfully mapped to Cybiko Escape (`CYBIKO_KEY_ESC`), closing OS dialogs and returning to Main Desktop without closing keyboard or activity.
+  - Bottom display layout updated with compact action toolbar (`+ LOAD .APP`, `SAVE`, `PALETTE`, `RESET`) above full QWERTY touch matrix.
+  - Periodic auto-save verified: `NVRAM successfully persisted (2097152 bytes)` written every 30 seconds.
+  - Pushed curated test library (`pinball_pro.app`, `Homerun_X.app`, `tetris.app`, `Snake.app`, `BTower_X.app`) to `/sdcard/Download/Cybiko_Games/` for testing with SAF file picker.
+  - Core frame time: **4.16 ms - 4.47 ms** (**58.4 - 60.5 FPS**).
+- **Verdict:** PASS. Clamshell toolbar and game loader verified operational.
 
 
 

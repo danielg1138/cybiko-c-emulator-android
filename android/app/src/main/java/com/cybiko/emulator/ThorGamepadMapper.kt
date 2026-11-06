@@ -30,9 +30,10 @@ object ThorGamepadMapper {
             KeyEvent.KEYCODE_BUTTON_THUMBL -> CybikoNative.KEY_FN     /* Left Stick Click -> Fn */
             KeyEvent.KEYCODE_BUTTON_THUMBR -> CybikoNative.KEY_SHIFT  /* Right Stick Click -> Shift */
 
-            /* Start / Select Buttons */
+            /* Start / Select Buttons & System Keys */
             KeyEvent.KEYCODE_BUTTON_START -> CybikoNative.KEY_ENTER
             KeyEvent.KEYCODE_BUTTON_SELECT -> CybikoNative.KEY_SELECT
+            KeyEvent.KEYCODE_BACK -> CybikoNative.KEY_ESC            /* Hardware Back -> Cybiko ESC */
 
             /* Standard Hardware Keyboard fallback (if USB/Bluetooth keyboard attached) */
             KeyEvent.KEYCODE_A -> CybikoNative.KEY_A
