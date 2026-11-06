@@ -423,3 +423,26 @@ Java_com_cybiko_emulator_CybikoNative_nativeGetCoreMs(JNIEnv *env, jclass clazz)
     (void)clazz;
     return g_ctx.avg_core_ms;
 }
+
+JNIEXPORT void JNICALL
+Java_com_cybiko_emulator_CybikoNative_nativeSetSpeedMode(
+    JNIEnv *env, jclass clazz, jint mode)
+{
+    (void)env;
+    (void)clazz;
+    if (g_initialized && g_ctx.emu) {
+        cybiko_set_speed_mode(g_ctx.emu, (cybiko_speed_mode_t)mode);
+        LOGI("Speed mode changed to %d (CPI=%d)", (int)mode, cybiko_get_cpi(g_ctx.emu));
+    }
+}
+
+JNIEXPORT jint JNICALL
+Java_com_cybiko_emulator_CybikoNative_nativeGetSpeedMode(JNIEnv *env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+    if (g_initialized && g_ctx.emu) {
+        return (jint)cybiko_get_speed_mode(g_ctx.emu);
+    }
+    return 0;
+}

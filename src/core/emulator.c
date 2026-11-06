@@ -31,6 +31,7 @@ struct cybiko_emu {
     keyboard_t    keyboard;
 
     bool     running;
+    int      cpi;
     uint64_t total_steps;
     uint32_t frame_count;
 };
@@ -99,6 +100,7 @@ cybiko_emu_t *cybiko_create(const cybiko_hal_t *hal) {
     emu->bus.cpu = &emu->cpu;
 
     emu->running = true;
+    emu->cpi = 4; /* Default to Authentic 1.0x hardware speed */
 
     return emu;
 }
@@ -156,16 +158,21 @@ void cybiko_run_frame(cybiko_emu_t *emu) {
     /* Begin speaker frame (record start level, reset transitions) */
     speaker_begin_frame(&emu->speaker);
 
+    int cpi = emu->cpi > 0 ? emu->cpi : 4;
+
     /* Execute one frame worth of CPU cycles */
-    for (int cycle = 0; cycle < CYBIKO_CYCLES_PER_FRAME; cycle++) {
+    int cycle = 0;
+    while (cycle < CYBIKO_CYCLES_PER_FRAME) {
         /* Track cycle position for speaker transition timestamps */
         emu->speaker.frame_cycle = cycle;
 
-        /* Tick timers */
-        if (t8_0) timer8_tick(&emu->timer8[0]);
-        if (t8_1) timer8_tick(&emu->timer8[1]);
-        for (int i = 0; i < 6; i++) {
-            if (t16[i]) timer16_tick(&emu->timer16[i]);
+        /* Tick timers for 'cpi' clock cycles */
+        for (int k = 0; k < cpi; k++) {
+            if (t8_0) timer8_tick(&emu->timer8[0]);
+            if (t8_1) timer8_tick(&emu->timer8[1]);
+            for (int i = 0; i < 6; i++) {
+                if (t16[i]) timer16_tick(&emu->timer16[i]);
+            }
         }
 
         /* CPU step */
@@ -175,6 +182,7 @@ void cybiko_run_frame(cybiko_emu_t *emu) {
         bus_tick_dma_completion(&emu->bus);
 
         emu->total_steps++;
+        cycle += cpi;
     }
 
     /* Render the frame via HAL */
@@ -221,4 +229,44 @@ bool cybiko_is_running(const cybiko_emu_t *emu) {
 const uint8_t *cybiko_get_nvram(const cybiko_emu_t *emu, size_t *len) {
     if (len) *len = emu->bus.external_ram.size;
     return memory_raw((memory_t *)&emu->bus.external_ram);
+}
+
+void cybiko_set_speed_mode(cybiko_emu_t *emu, cybiko_speed_mode_t mode) {
+    if (!emu) return;
+    switch (mode) {
+    case CYBIKO_SPEED_AUTHENTIC:
+        emu->cpi = 4; /* 1.0x Authentic H8S speed (~76.8k inst/frame) */
+        break;
+    case CYBIKO_SPEED_FAST:
+        emu->cpi = 2; /* 2.0x Fast Forward (~153.6k inst/frame) */
+        break;
+    case CYBIKO_SPEED_TURBO:
+        emu->cpi = 1; /* 4.0x Turbo (~307.2k inst/frame) */
+        break;
+    case CYBIKO_SPEED_CLASSIC:
+        emu->cpi = 6; /* 0.67x Cybiko Classic 11 MHz (~51.2k inst/frame) */
+        break;
+    default:
+        emu->cpi = 4;
+        break;
+    }
+}
+
+cybiko_speed_mode_t cybiko_get_speed_mode(const cybiko_emu_t *emu) {
+    if (!emu) return CYBIKO_SPEED_AUTHENTIC;
+    if (emu->cpi == 4) return CYBIKO_SPEED_AUTHENTIC;
+    if (emu->cpi == 2) return CYBIKO_SPEED_FAST;
+    if (emu->cpi == 1) return CYBIKO_SPEED_TURBO;
+    if (emu->cpi == 6) return CYBIKO_SPEED_CLASSIC;
+    return CYBIKO_SPEED_AUTHENTIC;
+}
+
+void cybiko_set_cpi(cybiko_emu_t *emu, int cpi) {
+    if (emu && cpi >= 1 && cpi <= 16) {
+        emu->cpi = cpi;
+    }
+}
+
+int cybiko_get_cpi(const cybiko_emu_t *emu) {
+    return emu ? emu->cpi : 4;
 }

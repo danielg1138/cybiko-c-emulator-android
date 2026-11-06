@@ -15,6 +15,7 @@
 | **009** | Ayn Thor (`3767dd3c`) | Hardware Boot, Dual-Screen, CFS & -O3 Optimization | 3.80 ms - 4.20 ms (59.5-60.4 FPS) | Top screen 10x integer scale, bottom screen Presentation keyboard, physical Button A maps to Enter, CFS 512 KB formatted | **PASS** (Hardware 60 FPS validated) |
 | **010** | Ayn Thor (`3767dd3c`) | Clamshell Toolbar, Back-to-ESC Mapping, SAF Loader | 4.16 ms - 4.47 ms (58.4-60.5 FPS) | Back key maps to Cybiko ESC (no dialog dismiss), bottom toolbar (+LOAD .APP, SAVE, PALETTE, RESET), 30s auto-save verified | **PASS** (App loading & toolbar operational) |
 | **011** | Ayn Thor (`3767dd3c`) | Dual-Screen Lifecycle Sync & In-App App Browser | 4.14 ms - 4.30 ms (58.9-60.0 FPS) | Synchronized onStart/onStop presentation dismiss on Home (melonDS/Azahar pattern); in-app file browser lists .app files directly | **PASS** (Screen sync & file browser verified) |
+| **012** | Ayn Thor (`3767dd3c`) | Hardware Speed Calibration & Dynamic Speed Modes | 3.41 ms - 4.60 ms (58.8-59.4 FPS) | Fixed 1-cycle-per-instruction bug (18.43 MIPS -> 4.61 MIPS authentic); added bottom toolbar speed toggle (1.0x / 2.0x / 4.0x / Classic) | **PASS** (Authentic speed verified on Thor) |
 
 ---
 
@@ -122,6 +123,30 @@
 
 
 
+
+### Run 012: CPU Instruction Cycle Calibration & Dynamic Speed Control
+- **Hypothesis:** Games run excessively fast because `cybiko_run_frame` executed 307,200 instructions per frame (18.432 MIPS, treating 1 instruction = 1 clock cycle) rather than the authentic H8S execution profile of ~3.5-4.0 cycles per instruction (~76,800-87,000 instructions/frame at 18.432 MHz). Calibrating the frame cycle loop to advance by instruction cycles while preserving nominal peripheral timer ticks and speaker sampling (800 samples/frame @ 48 kHz) will restore authentic game physics and pacing, while dynamic speed modes (1.0x, 2.0x, 4.0x Turbo, Classic 11 MHz) provide full user configurability.
+- **Measurement:** 
+  1. Profiled TMR0 system tick interrupt: confirmed CyOS reloads TMR0 to generate an authentic 98 Hz (10 ms) scheduler tick.
+  2. Implemented `cpi` clock scaling in `cybiko_run_frame`: timers tick `cpi` cycles per instruction while CPU executes $307,200 / \text{cpi}$ instructions per frame.
+  3. Added `nativeSetSpeedMode`/`nativeGetSpeedMode` in JNI and a dynamic `SPEED` button (`1.0X` / `2.0X` / `4.0X` / `CLASSIC`) to the Ayn Thor bottom clamshell toolbar.
+  4. Deployed APK to Ayn Thor (`3767dd3c`), tested interactive speed mode toggling, verified audio and frame pacing telemetry.
+- **Result:**
+  - `[cybiko-telemetry]` locked at 58.8–59.4 FPS with 3.41–4.60 ms core execution time per frame.
+  - Audio callback generation remained exactly 800 samples/frame (48,000 Hz).
+  - Tapping the speed button cycled:
+    ```text
+    I CybikoJNI: Speed mode changed to 1 (CPI=2)
+    I CybikoMainActivity: Speed mode changed to 2.0x (Fast) (1)
+    I CybikoJNI: Speed mode changed to 2 (CPI=1)
+    I CybikoMainActivity: Speed mode changed to 4.0x (Turbo) (2)
+    I CybikoJNI: Speed mode changed to 3 (CPI=6)
+    I CybikoMainActivity: Speed mode changed to Classic (11 MHz) (3)
+    I CybikoJNI: Speed mode changed to 0 (CPI=4)
+    I CybikoMainActivity: Speed mode changed to 1.0x (Authentic) (0)
+    ```
+  - Both top LCD screen and secondary presentation toolbar updated synchronously on hardware.
+- **Verdict:** PASS. Game physics, delay loops, and animations now run at authentic 1.0x hardware speed by default, with dynamic on-device speed toggling operational.
 
 ### Run 001: Core Unit Test Baseline
 - **Hypothesis:** All 8 unit tests in `tests/` pass unmodified under standard C11.

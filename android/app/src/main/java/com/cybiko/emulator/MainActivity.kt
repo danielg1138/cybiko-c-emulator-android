@@ -34,6 +34,8 @@ class MainActivity : AppCompatActivity() {
     private var emuThread: Thread? = null
     private val isRunning = AtomicBoolean(false)
     private var currentPalette = CybikoNative.PALETTE_CYBIKO_GREEN
+    private var currentSpeedMode = CybikoNative.SPEED_AUTHENTIC
+    private var btnPresentationSpeed: Button? = null
 
     private var currentBrowserDir = File("/sdcard/Download/Cybiko_Games").let {
         if (it.exists()) it else Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
@@ -102,6 +104,9 @@ class MainActivity : AppCompatActivity() {
             saveNvram()
             Toast.makeText(this, "NVRAM saved", Toast.LENGTH_SHORT).show()
         }
+        findViewById<Button>(R.id.btnMainSpeed)?.setOnClickListener {
+            cycleSpeedMode()
+        }
         findViewById<Button>(R.id.btnMainPalette).setOnClickListener {
             cyclePalette()
         }
@@ -153,6 +158,12 @@ class MainActivity : AppCompatActivity() {
                             saveNvram()
                             Toast.makeText(this@MainActivity, "NVRAM saved", Toast.LENGTH_SHORT).show()
                         }
+                        val btnSpeed = presentationView.findViewById<Button>(R.id.btnSpeed)
+                        btnPresentationSpeed = btnSpeed
+                        btnSpeed.setOnClickListener {
+                            Log.i(TAG, "User tapped 'SPEED' button")
+                            cycleSpeedMode()
+                        }
                         presentationView.findViewById<Button>(R.id.btnPalette).setOnClickListener {
                             Log.i(TAG, "User tapped 'PALETTE' button")
                             cyclePalette()
@@ -161,6 +172,7 @@ class MainActivity : AppCompatActivity() {
                             Log.i(TAG, "User tapped 'RESET' button")
                             showResetDialog()
                         }
+                        updateSpeedButtons()
                     }
 
                     override fun onBackPressed() {
@@ -333,6 +345,33 @@ class MainActivity : AppCompatActivity() {
         }
         Log.i(TAG, "Palette switched to $name ($currentPalette)")
         Toast.makeText(this, "Palette: $name", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun cycleSpeedMode() {
+        currentSpeedMode = (currentSpeedMode + 1) % 4
+        CybikoNative.nativeSetSpeedMode(currentSpeedMode)
+        updateSpeedButtons()
+        val name = when (currentSpeedMode) {
+            CybikoNative.SPEED_AUTHENTIC -> "1.0x (Authentic)"
+            CybikoNative.SPEED_FAST -> "2.0x (Fast)"
+            CybikoNative.SPEED_TURBO -> "4.0x (Turbo)"
+            CybikoNative.SPEED_CLASSIC -> "Classic (11 MHz)"
+            else -> "1.0x"
+        }
+        Log.i(TAG, "Speed mode changed to $name ($currentSpeedMode)")
+        Toast.makeText(this, "Speed: $name", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun updateSpeedButtons() {
+        val label = when (currentSpeedMode) {
+            CybikoNative.SPEED_AUTHENTIC -> "1.0x"
+            CybikoNative.SPEED_FAST -> "2.0x"
+            CybikoNative.SPEED_TURBO -> "4.0x"
+            CybikoNative.SPEED_CLASSIC -> "CLASSIC"
+            else -> "1.0x"
+        }
+        findViewById<Button>(R.id.btnMainSpeed)?.text = label
+        btnPresentationSpeed?.text = label
     }
 
     private fun showResetDialog() {

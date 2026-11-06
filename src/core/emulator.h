@@ -15,6 +15,19 @@ void cybiko_run_frame(cybiko_emu_t *emu);
 bool cybiko_is_running(const cybiko_emu_t *emu);
 const uint8_t *cybiko_get_nvram(const cybiko_emu_t *emu, size_t *len);
 
+typedef enum {
+    CYBIKO_SPEED_AUTHENTIC = 0,  /* 1.0x Authentic H8S speed (CPI = 4) */
+    CYBIKO_SPEED_FAST      = 1,  /* 2.0x Fast Forward (CPI = 2) */
+    CYBIKO_SPEED_TURBO     = 2,  /* 4.0x Turbo / Uncapped (CPI = 1) */
+    CYBIKO_SPEED_CLASSIC   = 3,  /* Cybiko Classic 11.0592 MHz (CPI = 6) */
+    CYBIKO_SPEED_COUNT     = 4
+} cybiko_speed_mode_t;
+
+void cybiko_set_speed_mode(cybiko_emu_t *emu, cybiko_speed_mode_t mode);
+cybiko_speed_mode_t cybiko_get_speed_mode(const cybiko_emu_t *emu);
+void cybiko_set_cpi(cybiko_emu_t *emu, int cpi);
+int  cybiko_get_cpi(const cybiko_emu_t *emu);
+
 #define CYBIKO_LCD_WIDTH   160
 #define CYBIKO_LCD_HEIGHT  100
 #define CYBIKO_CLOCK_HZ    18432000

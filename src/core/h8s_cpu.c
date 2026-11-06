@@ -1627,6 +1627,7 @@ static bool process_interrupts(h8s_cpu_t *cpu) {
     if (get_flag(cpu, BIT_I)) return false;
 
     int vector = cpu->pending_irqs[0];
+    if (vector >= 0 && vector < 128) cpu->irq_dispatched[vector]++;
     cpu->pending_irq_count--;
     if (cpu->pending_irq_count > 0)
         memmove(&cpu->pending_irqs[0], &cpu->pending_irqs[1],

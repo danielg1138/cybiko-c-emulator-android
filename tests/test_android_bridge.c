@@ -33,17 +33,15 @@ static int test_key_hold_minimum(void) {
     cybiko_input_set_key(&input, CY_KEY_A, false);
     TEST_ASSERT((input.key_matrix[3] & 0x0004) != 0, "Key A must remain held due to 3-frame hold rule");
 
-    /* Frame 1 */
-    cybiko_input_tick_frame(&input);
-    TEST_ASSERT((input.key_matrix[3] & 0x0004) != 0, "Key A must still be held at frame 1");
+    /* Frames 1 to CYBIKO_MIN_HOLD_FRAMES - 1: key must stay held */
+    for (int f = 1; f < CYBIKO_MIN_HOLD_FRAMES; f++) {
+        cybiko_input_tick_frame(&input);
+        TEST_ASSERT((input.key_matrix[3] & 0x0004) != 0, "Key A must still be held during hold window");
+    }
 
-    /* Frame 2 */
+    /* Final frame: Hold expires, release takes effect */
     cybiko_input_tick_frame(&input);
-    TEST_ASSERT((input.key_matrix[3] & 0x0004) != 0, "Key A must still be held at frame 2");
-
-    /* Frame 3: Hold expires, release takes effect */
-    cybiko_input_tick_frame(&input);
-    TEST_ASSERT((input.key_matrix[3] & 0x0004) == 0, "Key A must be released after 3 frames");
+    TEST_ASSERT((input.key_matrix[3] & 0x0004) == 0, "Key A must be released after hold window");
 
     TEST_PASS();
 }

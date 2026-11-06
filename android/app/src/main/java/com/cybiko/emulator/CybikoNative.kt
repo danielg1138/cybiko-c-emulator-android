@@ -11,6 +11,12 @@ object CybikoNative {
     const val PALETTE_GRAYSCALE = 1
     const val PALETTE_AMBER = 2
 
+    /* Speed Modes matching cybiko_speed_mode_t */
+    const val SPEED_AUTHENTIC = 0  /* 1.0x Authentic H8S (CPI = 4) */
+    const val SPEED_FAST = 1       /* 2.0x Fast Forward (CPI = 2) */
+    const val SPEED_TURBO = 2      /* 4.0x Turbo Uncapped (CPI = 1) */
+    const val SPEED_CLASSIC = 3    /* 0.67x Cybiko Classic 11 MHz (CPI = 6) */
+
     const val LCD_WIDTH = 160
     const val LCD_HEIGHT = 100
 
@@ -95,4 +101,6 @@ object CybikoNative {
     @JvmStatic external fun nativeSetPalette(paletteMode: Int)
     @JvmStatic external fun nativeGetFps(): Float
     @JvmStatic external fun nativeGetCoreMs(): Float
+    @JvmStatic external fun nativeSetSpeedMode(mode: Int)
+    @JvmStatic external fun nativeGetSpeedMode(): Int
 }

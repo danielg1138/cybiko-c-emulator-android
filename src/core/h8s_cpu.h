@@ -28,6 +28,7 @@ typedef struct h8s_cpu {
 
     address_bus_t *bus;
     uint64_t cycle_count;
+    uint32_t irq_dispatched[128];
 
     bool     tracing;
     uint32_t last_start_pc;
